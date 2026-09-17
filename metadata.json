@@ -1,0 +1,6 @@
+{
+  "name": "AI Bot Advance - Quantitative Trading Engine",
+  "description": "Decoupled quantitative trading engine with real-time news recommendations from leading financial portals, universe volatility heatmap, Yahoo Finance market data, Gemini multi-agent debate, deterministic risk controls, and paper/Kite execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
