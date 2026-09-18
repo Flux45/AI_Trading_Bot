@@ -16,6 +16,7 @@ import { MarketSentimentDial } from './components/MarketSentimentDial';
 import { ActiveTradesLivePnl } from './components/ActiveTradesLivePnl';
 import { SelectedStockHorizonCard } from './components/SelectedStockHorizonCard';
 import { DecisionReasoningView } from './components/DecisionReasoningView';
+import { MyStocksView } from './components/MyStocksView';
 import { ToastNotificationCenter } from './components/ToastNotificationCenter';
 import { usePnlAlerts } from './hooks/usePnlAlerts';
 import type {
@@ -28,6 +29,9 @@ import type {
   ScannedStock,
   MarketSentimentSummary,
   OrderTicket,
+  Autonomous7DaySummary,
+  AutonomousDaemonStatus,
+  PortfolioAccounting,
 } from './types';
 
 const INITIAL_WATCHLIST = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK'];
@@ -48,6 +52,12 @@ export default function App() {
   const [scannedStocks, setScannedStocks] = useState<ScannedStock[]>([]);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [marketSentiment, setMarketSentiment] = useState<MarketSentimentSummary | null>(null);
+
+  // Autonomous 7-Day Trading Engine State
+  const [autonomousSummary, setAutonomousSummary] = useState<Autonomous7DaySummary | null>(null);
+  const [daemonStatus, setDaemonStatus] = useState<AutonomousDaemonStatus | null>(null);
+  const [isLoadingAutonomous, setIsLoadingAutonomous] = useState<boolean>(false);
+  const [accounting, setAccounting] = useState<PortfolioAccounting | null>(null);
 
   // Live PnL Toast Notification Alert System
   const [showAlertSettings, setShowAlertSettings] = useState<boolean>(false);
@@ -74,8 +84,8 @@ export default function App() {
     },
     system: {
       paperTradingMode: true,
-      initialPaperCapital: 100000.0,
-      currentPaperCapital: 100000.0,
+      initialPaperCapital: 50000.0,
+      currentPaperCapital: 50000.0,
       maxRiskPerTradePct: 0.01,
       maxPositionConcentration: 0.20,
       defaultProductType: 'CNC',
@@ -99,7 +109,11 @@ export default function App() {
           const memData = await memRes.json();
           if (memData.openPositions) setPositions(memData.openPositions);
           if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
+          if (memData.accounting) setAccounting(memData.accounting);
         }
+
+        // Fetch dedicated canonical accounting
+        fetchAccounting();
 
         // Fetch transaction audit ledger
         fetchTransactions();
@@ -116,6 +130,9 @@ export default function App() {
 
         // Background initial scan of 40-stock universe
         handleRunUniverseScan();
+
+        // Fetch Autonomous 7-Day Bot Summary
+        fetchAutonomousSummary();
       } catch (err) {
         console.error('Failed to load initial data:', err);
       }
@@ -152,6 +169,24 @@ export default function App() {
     }
   };
 
+  // Dedicated fetch for unified canonical portfolio accounting
+  const fetchAccounting = async () => {
+    try {
+      const res = await fetch('/api/portfolio/accounting');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.accounting) {
+          setAccounting(data.accounting);
+          if (data.accounting.positions) {
+            setPositions(data.accounting.positions);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch accounting:', e);
+    }
+  };
+
   // Reload memory, positions, and capital
   const fetchMemoryAndPositions = async () => {
     try {
@@ -160,12 +195,14 @@ export default function App() {
         const memData = await memRes.json();
         if (memData.openPositions) setPositions(memData.openPositions);
         if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
+        if (memData.accounting) setAccounting(memData.accounting);
       }
       const cfgRes = await fetch('/api/config');
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
         setConfig(cfg);
       }
+      fetchAccounting();
     } catch (e) {
       console.error('Failed to reload positions:', e);
     }
@@ -401,6 +438,9 @@ export default function App() {
 
     if (res.ok) {
       const data = await res.json();
+      if (data.accounting) {
+        setAccounting(data.accounting);
+      }
       if (data.updatedCapital) {
         setConfig((prev) => ({
           ...prev,
@@ -412,12 +452,7 @@ export default function App() {
       }
 
       // Refresh positions, memory & transactions ledger
-      const memRes = await fetch('/api/memory');
-      if (memRes.ok) {
-        const memData = await memRes.json();
-        if (memData.openPositions) setPositions(memData.openPositions);
-        if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
-      }
+      await fetchMemoryAndPositions();
       fetchTransactions();
     }
   };
@@ -427,6 +462,7 @@ export default function App() {
     const res = await fetch('/api/portfolio/reset', { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
+      if (data.accounting) setAccounting(data.accounting);
       setConfig((prev) => ({
         ...prev,
         system: {
@@ -435,7 +471,143 @@ export default function App() {
         },
       }));
       setPositions([]);
+      setTradeHistory([]);
       fetchTransactions();
+      fetchAutonomousSummary();
+    }
+  };
+
+  // Fetch Autonomous 7-Day Summary
+  const fetchAutonomousSummary = async () => {
+    try {
+      const res = await fetch('/api/autonomous/7day-summary');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.summary) setAutonomousSummary(data.summary);
+        if (data.status) setDaemonStatus(data.status);
+        if (data.accounting) setAccounting(data.accounting);
+      }
+    } catch (e) {
+      console.error('Failed to fetch autonomous 7-day summary:', e);
+    }
+  };
+
+  // Run 7-day autonomous cycle
+  const handleRun7DayCycle = async () => {
+    setIsLoadingAutonomous(true);
+    try {
+      const res = await fetch('/api/autonomous/run-7day', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingCapital: 50000.0 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.summary) setAutonomousSummary(data.summary);
+        if (data.openPositions) setPositions(data.openPositions);
+        if (data.tradeHistory) setTradeHistory(data.tradeHistory);
+        if (data.accounting) setAccounting(data.accounting);
+        if (data.systemConfig) setConfig(data.systemConfig);
+        fetchTransactions();
+      }
+    } catch (err) {
+      console.error('Failed to execute 7-day autonomous cycle:', err);
+    } finally {
+      setIsLoadingAutonomous(false);
+    }
+  };
+
+  // Start 7-Day Live Real-Time Campaign (Day 1)
+  const handleStartLiveCampaign = async () => {
+    setIsLoadingAutonomous(true);
+    try {
+      const res = await fetch('/api/autonomous/live-campaign/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingCapital: 50000.0 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.accounting) setAccounting(data.accounting);
+        if (data.campaign && daemonStatus) {
+          setDaemonStatus((prev) => prev ? { ...prev, campaign: data.campaign, adaptiveModel: data.adaptiveModel } : null);
+        }
+        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
+      }
+    } catch (err) {
+      console.error('Failed to start live 7-day campaign:', err);
+    } finally {
+      setIsLoadingAutonomous(false);
+    }
+  };
+
+  // Immediate Real-Time Scan & Trade
+  const handleTradeNow = async () => {
+    setIsLoadingAutonomous(true);
+    try {
+      const res = await fetch('/api/autonomous/live-campaign/trade-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.accounting) setAccounting(data.accounting);
+        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
+      }
+    } catch (err) {
+      console.error('Failed to execute real-time trade:', err);
+    } finally {
+      setIsLoadingAutonomous(false);
+    }
+  };
+
+  // Full reset to zero state
+  const handleResetToZero = async () => {
+    setIsLoadingAutonomous(true);
+    try {
+      const res = await fetch('/api/portfolio/reset-zero', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingCapital: 50000.0 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPositions([]);
+        setTradeHistory([]);
+        setAutonomousSummary(null);
+        if (data.accounting) setAccounting(data.accounting);
+        setConfig((prev) => ({
+          ...prev,
+          system: {
+            ...prev.system,
+            initialPaperCapital: 50000.0,
+            currentPaperCapital: 50000.0,
+          },
+        }));
+        fetchTransactions();
+        fetchAutonomousSummary();
+      }
+    } catch (err) {
+      console.error('Failed to reset to zero:', err);
+    } finally {
+      setIsLoadingAutonomous(false);
+    }
+  };
+
+  // Toggle Autonomous Bot Daemon
+  const handleToggleDaemon = async (enabled?: boolean) => {
+    try {
+      const res = await fetch('/api/autonomous/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status) setDaemonStatus(data.status);
+      }
+    } catch (err) {
+      console.error('Failed to toggle autonomous daemon:', err);
     }
   };
 
@@ -456,6 +628,7 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => {
       fetchMemoryAndPositions();
+      fetchAutonomousSummary();
     }, 15000);
     return () => clearInterval(timer);
   }, []);
@@ -490,21 +663,21 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+        {/* Universal Persistent Active Trades Live Profit/Loss Bar - Always visible across ALL tabs if open positions exist */}
+        {positions.length > 0 && (
+          <ActiveTradesLivePnl
+            positions={positions}
+            onClosePosition={handleClosePosition}
+            onViewPortfolio={() => setActiveTab('portfolio')}
+            onOpenAlertSettings={() => setShowAlertSettings(true)}
+            alertThresholds={{ profitPct: thresholds.profitPct, lossPct: thresholds.lossPct }}
+          />
+        )}
+
         {/* TAB 1: Live Pipeline & Radar */}
         {activeTab === 'pipeline' && (
           <div className="space-y-6">
-            {/* Active Trades Live Profit/Loss Bar */}
-            {positions.length > 0 && (
-              <ActiveTradesLivePnl
-                positions={positions}
-                onClosePosition={handleClosePosition}
-                onViewPortfolio={() => setActiveTab('portfolio')}
-                onOpenAlertSettings={() => setShowAlertSettings(true)}
-                alertThresholds={{ profitPct: thresholds.profitPct, lossPct: thresholds.lossPct }}
-              />
-            )}
-
             {/* Watchlist Radar Bar */}
             <WatchlistRadar
               watchlist={watchlist}
@@ -578,6 +751,19 @@ export default function App() {
               isPlacingOrder={isPlacingOrder}
             />
           </div>
+        )}
+
+        {/* User Requested TAB: My Stocks Zerodha Statement & AI BOT ADVANCE Audit */}
+        {activeTab === 'my_stocks' && (
+          <MyStocksView
+            onExecuteManualTrade={(ticker, action, shares) => {
+              handlePlaceManualOrder({
+                ticker,
+                action,
+                shares,
+              });
+            }}
+          />
         )}
 
         {/* User Requested TAB: Decision Reasoning & Trade Loss Prevention */}
@@ -658,7 +844,16 @@ export default function App() {
             tradeHistory={tradeHistory}
             onClosePosition={handleClosePosition}
             onResetPortfolio={handleResetPortfolio}
+            onResetToZero={handleResetToZero}
+            onRun7DayCycle={handleRun7DayCycle}
+            onStartLiveCampaign={handleStartLiveCampaign}
+            onTradeNow={handleTradeNow}
+            onToggleDaemon={handleToggleDaemon}
+            autonomousSummary={autonomousSummary}
+            daemonStatus={daemonStatus}
             onOpenAlertSettings={() => setShowAlertSettings(true)}
+            isLoadingAutonomous={isLoadingAutonomous}
+            accounting={accounting}
           />
         )}
 

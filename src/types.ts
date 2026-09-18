@@ -494,5 +494,136 @@ export interface MyStocksPortfolioSummary {
   sectorDistribution: { sector: string; value: number; pct: number }[];
 }
 
+export interface AutonomousTradeDay {
+  dayNumber: number;
+  dateLabel: string;
+  marketRegime: string;
+  analysisSummary: string;
+  tradesTaken: {
+    symbol: string;
+    company: string;
+    action: 'BUY' | 'SELL';
+    type: 'ENTRY' | 'TARGET_EXIT' | 'TRAILING_STOP_EXIT' | 'STOP_LOSS';
+    shares: number;
+    price: number;
+    value: number;
+    rationale: string;
+    riskReward: string;
+    realizedPnl?: number;
+    realizedPnlPct?: number;
+  }[];
+  endOfDayCapital: number;
+  endOfDayEquity: number;
+  unrealizedPnl: number;
+  netDayPnl: number;
+  cumulativeReturnPct: number;
+}
+
+export interface Autonomous7DaySummary {
+  initialCapital: number;
+  endingCapital: number;
+  endingEquity: number;
+  totalReturnRupees: number;
+  totalReturnPct: number;
+  annualizedReturnPct: number;
+  daysExecuted: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  activePositionsCount: number;
+  dailyBreakdown: AutonomousTradeDay[];
+  episodicLessonsLearned: string[];
+}
+
+export interface LearnedAdaptation {
+  id: string;
+  timestamp: string;
+  tradeId: string;
+  ticker: string;
+  outcome: 'WIN' | 'LOSS';
+  realizedPnl: number;
+  realizedPnlPct: number;
+  insight: string;
+  parameterAdjusted: string;
+  impactSummary: string;
+}
+
+export interface AdaptiveTradingModel {
+  version: string;
+  totalExperiences: number;
+  winRate: number;
+  profitFactor: number;
+  strategyWeights: {
+    momentumBreakout: number; // 0-100
+    trendFollowing20EMA: number;
+    meanReversionPullback: number;
+    lowBetaCompounder: number;
+  };
+  sectorConvictionMultipliers: Record<string, number>;
+  calibratedParameters: {
+    atrStopMultiplier: number; // e.g. 1.5 - 1.9x
+    atrTargetMultiplier: number; // e.g. 2.4 - 3.2x
+    minRiskReward: number; // e.g. 2.5:1
+    maxRiskPerTradeRupees: number; // e.g. ₹500
+    maxOpenPositions: number; // e.g. 4
+    kellyFractionMultiplier: number;
+  };
+  recentAdaptations: LearnedAdaptation[];
+  learningProgressSummary: string;
+}
+
+export interface AutonomousLiveCampaign {
+  campaignId: string;
+  status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
+  startDate: string;
+  currentDay: number; // 1 to 7
+  totalDays: number; // 7
+  isLiveRealtime: boolean;
+  unlimitedTradesAllowed: boolean;
+  initialCapital: number;
+  totalTradesExecuted: number;
+  winningTradesCount: number;
+  losingTradesCount: number;
+  winRate: number;
+  netRealizedPnl: number;
+  totalEquity: number;
+  activePositionsCount: number;
+  lastExecutionTimestamp?: string;
+  nextScheduledScanSeconds: number;
+}
+
+export interface AutonomousDaemonStatus {
+  isRunning: boolean;
+  mode: 'AUTONOMOUS_7_DAY' | 'STANDBY';
+  riskProfile: 'SAFEST_ASYMMETRIC';
+  initialCapital: number;
+  currentCapital: number;
+  totalReturnRupees: number;
+  totalReturnPct: number;
+  tradesCount: number;
+  lastPulseTime: string;
+  nextPulseSeconds: number;
+  lastActionSummary: string;
+  campaign?: AutonomousLiveCampaign;
+  adaptiveModel?: AdaptiveTradingModel;
+}
+
+export interface PortfolioAccounting {
+  initialCapital: number;
+  liquidCash: number;
+  investedCapital: number;
+  currentHoldingsValue: number;
+  totalRealizedPnl: number;
+  totalUnrealizedPnl: number;
+  totalEquity: number;
+  netTotalReturn: number;
+  netTotalReturnPct: number;
+  activePositionsCount: number;
+}
+
 
 

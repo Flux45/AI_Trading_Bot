@@ -423,7 +423,7 @@ export const INITIAL_USER_HOLDINGS: UserHolding[] = [
     targetPrice: 198.00,
     stopLoss: 168.00,
     riskReward: '1.9:1',
-    healthGrade: 'B+',
+    healthGrade: 'B',
     keyFlags: ['Cyclical Peak Alert', 'Lock In ₹1,333 Profit', 'Trailing Stop Required'],
   },
   {

@@ -172,6 +172,23 @@ export const Navbar: React.FC<NavbarProps> = ({
             Live Pipeline & Radar
           </button>
 
+          {/* User Requested: My Stocks Tab with AI BOT ADVANCE Analysis */}
+          <button
+            id="nav-tab-my_stocks"
+            onClick={() => onTabChange('my_stocks')}
+            className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-medium transition ${
+              activeTab === 'my_stocks'
+                ? 'border-indigo-600 text-indigo-700 font-semibold bg-indigo-50/50'
+                : 'border-transparent text-stone-600 hover:border-indigo-300 hover:text-indigo-600'
+            }`}
+          >
+            <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+            My Stocks
+            <span className="ml-1 rounded-full bg-indigo-100 px-1.5 py-0.2 text-[9px] font-bold text-indigo-800 flex items-center gap-0.5">
+              <Sparkles className="h-2.5 w-2.5 text-amber-500" /> AI BOT ADVANCE
+            </span>
+          </button>
+
           {/* User Requested: Decision Reasoning & Loss Prevention Tab */}
           <button
             id="nav-tab-decision_reasoning"

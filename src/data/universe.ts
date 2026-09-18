@@ -2,9 +2,9 @@ import type { StockUniverseItem } from '../types';
 
 export const STOCK_UNIVERSE: StockUniverseItem[] = [
   // 1. Banking & Financial Services
-  { ticker: 'HDFCBANK', name: 'HDFC Bank Ltd', sector: 'Banking & Finance', basePrice: 1655.40 },
-  { ticker: 'ICICIBANK', name: 'ICICI Bank Ltd', sector: 'Banking & Finance', basePrice: 1245.90 },
-  { ticker: 'SBIN', name: 'State Bank of India', sector: 'Banking & Finance', basePrice: 812.30 },
+  { ticker: 'HDFCBANK', name: 'HDFC Bank Ltd', sector: 'Banking & Finance', basePrice: 732.00 },
+  { ticker: 'ICICIBANK', name: 'ICICI Bank Ltd', sector: 'Banking & Finance', basePrice: 1342.00 },
+  { ticker: 'SBIN', name: 'State Bank of India', sector: 'Banking & Finance', basePrice: 992.00 },
   { ticker: 'KOTAKBANK', name: 'Kotak Mahindra Bank Ltd', sector: 'Banking & Finance', basePrice: 1785.60 },
   { ticker: 'AXISBANK', name: 'Axis Bank Ltd', sector: 'Banking & Finance', basePrice: 1195.20 },
   { ticker: 'BAJFINANCE', name: 'Bajaj Finance Ltd', sector: 'Banking & Finance', basePrice: 6980.00 },
@@ -20,8 +20,8 @@ export const STOCK_UNIVERSE: StockUniverseItem[] = [
   { ticker: 'ICICIPRULI', name: 'ICICI Prudential Life Ins', sector: 'Banking & Finance', basePrice: 720.00 },
 
   // 2. Information Technology
-  { ticker: 'TCS', name: 'Tata Consultancy Services Ltd', sector: 'Information Technology', basePrice: 4210.25 },
-  { ticker: 'INFY', name: 'Infosys Ltd', sector: 'Information Technology', basePrice: 1865.80 },
+  { ticker: 'TCS', name: 'Tata Consultancy Services Ltd', sector: 'Information Technology', basePrice: 2117.00 },
+  { ticker: 'INFY', name: 'Infosys Ltd', sector: 'Information Technology', basePrice: 1475.00 },
   { ticker: 'WIPRO', name: 'Wipro Ltd', sector: 'Information Technology', basePrice: 540.30 },
   { ticker: 'HCLTECH', name: 'HCL Technologies Ltd', sector: 'Information Technology', basePrice: 1750.40 },
   { ticker: 'TECHM', name: 'Tech Mahindra Ltd', sector: 'Information Technology', basePrice: 1615.00 },
@@ -45,7 +45,7 @@ export const STOCK_UNIVERSE: StockUniverseItem[] = [
   { ticker: 'MOTHERSON', name: 'Samvardhana Motherson Intl', sector: 'Automobile', basePrice: 198.00 },
 
   // 4. Energy, Oil & Gas
-  { ticker: 'RELIANCE', name: 'Reliance Industries Ltd', sector: 'Energy, Oil & Gas', basePrice: 2990.50 },
+  { ticker: 'RELIANCE', name: 'Reliance Industries Ltd', sector: 'Energy, Oil & Gas', basePrice: 1243.00 },
   { ticker: 'ONGC', name: 'Oil and Natural Gas Corp', sector: 'Energy, Oil & Gas', basePrice: 310.20 },
   { ticker: 'IOC', name: 'Indian Oil Corporation Ltd', sector: 'Energy, Oil & Gas', basePrice: 168.00 },
   { ticker: 'BPCL', name: 'Bharat Petroleum Corp Ltd', sector: 'Energy, Oil & Gas', basePrice: 345.00 },
@@ -110,7 +110,7 @@ export const STOCK_UNIVERSE: StockUniverseItem[] = [
   { ticker: 'SHREECEM', name: 'Shree Cement Ltd', sector: 'Cement & Building Materials', basePrice: 24600.00 },
 
   // 10. Infrastructure, Capital Goods & Defense
-  { ticker: 'LT', name: 'Larsen & Toubro Ltd', sector: 'Capital Goods & Infra', basePrice: 3580.00 },
+  { ticker: 'LT', name: 'Larsen & Toubro Ltd', sector: 'Capital Goods & Infra', basePrice: 3875.00 },
   { ticker: 'HAL', name: 'Hindustan Aeronautics Ltd', sector: 'Capital Goods & Infra', basePrice: 4680.00 },
   { ticker: 'BEL', name: 'Bharat Electronics Ltd', sector: 'Capital Goods & Infra', basePrice: 295.00 },
   { ticker: 'BHEL', name: 'Bharat Heavy Electricals Ltd', sector: 'Capital Goods & Infra', basePrice: 275.00 },
@@ -122,7 +122,7 @@ export const STOCK_UNIVERSE: StockUniverseItem[] = [
   { ticker: 'MAZDOCK', name: 'Mazagon Dock Shipbuilders', sector: 'Capital Goods & Infra', basePrice: 4120.00 },
 
   // 11. Telecom & Media
-  { ticker: 'BHARTIARTL', name: 'Bharti Airtel Ltd', sector: 'Telecom & Media', basePrice: 1540.20 },
+  { ticker: 'BHARTIARTL', name: 'Bharti Airtel Ltd', sector: 'Telecom & Media', basePrice: 1840.00 },
   { ticker: 'TATACOMM', name: 'Tata Communications Ltd', sector: 'Telecom & Media', basePrice: 1980.00 },
   { ticker: 'ZEEL', name: 'Zee Entertainment Enterprise', sector: 'Telecom & Media', basePrice: 135.00 },
   { ticker: 'PVRINOX', name: 'PVR INOX Ltd', sector: 'Telecom & Media', basePrice: 1420.00 },

@@ -125,9 +125,10 @@ export const MyStocksView: React.FC<MyStocksViewProps> = ({ onExecuteManualTrade
     }
   };
 
-  // Reset to original statement
+  const [notification, setNotification] = useState<{ message: string; type: 'info' | 'success' } | null>(null);
+
+  // Reset to original statement (Roll Back)
   const handleResetStatement = async () => {
-    if (!window.confirm('Reset portfolio back to original Zerodha statement holdings?')) return;
     setIsLoading(true);
     try {
       const res = await fetch('/api/my-stocks/reset', { method: 'POST' });
@@ -137,12 +138,33 @@ export const MyStocksView: React.FC<MyStocksViewProps> = ({ onExecuteManualTrade
           setHoldings(data.holdings);
           setSummary(data.summary);
           setRecommendations(data.recommendations);
+          setNotification({
+            message: 'Portfolio successfully rolled back to original Zerodha statement (0 changes executed).',
+            type: 'success',
+          });
         }
+      } else {
+        // Fallback to local pristine state
+        setHoldings(INITIAL_USER_HOLDINGS);
+        setSummary(INITIAL_MY_STOCKS_SUMMARY);
+        setRecommendations(INITIAL_MY_STOCKS_SUMMARY.recommendations);
+        setNotification({
+          message: 'Portfolio rolled back to original Zerodha statement holdings.',
+          type: 'success',
+        });
       }
     } catch (err) {
       console.error('Failed to reset statement', err);
+      setHoldings(INITIAL_USER_HOLDINGS);
+      setSummary(INITIAL_MY_STOCKS_SUMMARY);
+      setRecommendations(INITIAL_MY_STOCKS_SUMMARY.recommendations);
+      setNotification({
+        message: 'Portfolio rolled back to original Zerodha statement holdings.',
+        type: 'success',
+      });
     } finally {
       setIsLoading(false);
+      setTimeout(() => setNotification(null), 5000);
     }
   };
 
@@ -239,23 +261,67 @@ export const MyStocksView: React.FC<MyStocksViewProps> = ({ onExecuteManualTrade
                 {isExecutingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                 Execute All Changes ({pendingRecsCount} Actions)
               </button>
-            ) : (
-              <div className="px-3 py-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                All 8 Changes Executed
-              </div>
-            )}
+            ) : null}
 
+            {executedRecsCount > 0 ? (
+              <button
+                onClick={handleResetStatement}
+                disabled={isLoading}
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all disabled:opacity-50"
+              >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                Roll Back to Original Statement
+              </button>
+            ) : (
+              <button
+                onClick={handleResetStatement}
+                disabled={isLoading}
+                title="Reload original Zerodha statement"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 text-xs transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* State Feedback Banner */}
+        {notification && (
+          <div className="mt-4 p-3 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-medium flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{notification.message}</span>
+          </div>
+        )}
+
+        {executedRecsCount > 0 && !notification && (
+          <div className="mt-4 p-3 rounded-lg bg-amber-950/40 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2 text-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                <strong>Simulated Rebalance Active:</strong> {executedRecsCount} of {recommendations.length} recommended changes have been executed in this view.
+              </span>
+            </div>
             <button
               onClick={handleResetStatement}
               disabled={isLoading}
-              title="Reset holdings back to original statement"
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 text-xs transition-colors"
+              className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition shadow"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" /> Roll Back to Original Statement
             </button>
           </div>
-        </div>
+        )}
+
+        {executedRecsCount === 0 && !notification && (
+          <div className="mt-4 p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50 flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center gap-2 text-slate-300">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>Original Statement View:</strong> Showing your verified unadjusted Zerodha statement (0 changes executed).
+              </span>
+            </div>
+            <span className="text-[11px] font-mono text-indigo-300">8 Optimization Changes Ready</span>
+          </div>
+        )}
 
         {/* Quick Executive Health Bar */}
         <div className="mt-5 pt-5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -429,6 +495,15 @@ export const MyStocksView: React.FC<MyStocksViewProps> = ({ onExecuteManualTrade
             <span className="text-xs text-slate-400 font-medium">
               Progress: <strong className="text-emerald-400">{executedRecsCount}</strong> / {recommendations.length} Executed
             </span>
+            {executedRecsCount > 0 && (
+              <button
+                onClick={handleResetStatement}
+                disabled={isLoading}
+                className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1 transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Roll Back All
+              </button>
+            )}
           </div>
         </div>
 
@@ -509,8 +584,18 @@ export const MyStocksView: React.FC<MyStocksViewProps> = ({ onExecuteManualTrade
 
                 <div className="mt-4 pt-3 border-t border-slate-800">
                   {isExecuted ? (
-                    <div className="w-full py-1.5 px-3 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-400" /> Executed in Portfolio
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 py-1.5 px-3 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Executed
+                      </div>
+                      <button
+                        onClick={handleResetStatement}
+                        disabled={isLoading}
+                        title="Roll Back to Original Statement"
+                        className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium flex items-center gap-1 transition"
+                      >
+                        <RotateCcw className="w-3 h-3 text-amber-400" /> Undo
+                      </button>
                     </div>
                   ) : (
                     <button
