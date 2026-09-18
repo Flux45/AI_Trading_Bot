@@ -26,6 +26,15 @@ import {
   Compass,
   Activity,
   ArrowUpRight,
+  ArrowDownRight,
+  Target,
+  ShieldAlert,
+  Eye,
+  Cloud,
+  Server,
+  Copy,
+  ExternalLink,
+  Check,
 } from 'lucide-react';
 import type {
   ExecutedPosition,
@@ -52,6 +61,7 @@ interface PortfolioPanelProps {
   onOpenAlertSettings?: () => void;
   isLoadingAutonomous?: boolean;
   accounting?: PortfolioAccounting | null;
+  onSelectTickerForPipeline?: (ticker: string) => void;
 }
 
 export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
@@ -70,12 +80,38 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
   onOpenAlertSettings,
   isLoadingAutonomous = false,
   accounting,
+  onSelectTickerForPipeline,
 }) => {
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [exitPriceInput, setExitPriceInput] = useState<string>('');
   const [isSubmittingClose, setIsSubmittingClose] = useState(false);
   const [selectedDayTab, setSelectedDayTab] = useState<number>(7);
   const [showConfirmResetZero, setShowConfirmResetZero] = useState(false);
+  const [showCloudModal, setShowCloudModal] = useState(false);
+  const [isPingingCloud, setIsPingingCloud] = useState(false);
+  const [cloudPingResult, setCloudPingResult] = useState<any | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const handleTestPing = async () => {
+    setIsPingingCloud(true);
+    try {
+      const res = await fetch('/api/autonomous/pulse');
+      const data = await res.json();
+      setCloudPingResult(data);
+    } catch (err: any) {
+      setCloudPingResult({ status: 'ERROR', error: err?.message || 'Failed to ping' });
+    } finally {
+      setIsPingingCloud(false);
+    }
+  };
+
+  const handleCopyUrl = (url: string) => {
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(url);
+    }
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
 
   // Invariant Single Source of Truth for Capital & Returns
   const initialCapital = accounting?.initialCapital ?? config.system.initialPaperCapital;
@@ -137,6 +173,10 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
                 <Brain className="h-3 w-3" />
                 Reinforcement Learning Enabled
               </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/20 border border-sky-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-sky-200">
+                <Server className="h-3 w-3" />
+                24/7 Cloud Persistence
+              </span>
               <span className="inline-flex items-center gap-1 text-[11px] text-stone-400">
                 <Clock className="h-3 w-3" />
                 Zero Transaction Limit
@@ -153,6 +193,15 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
 
           {/* Quick Action Controls */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowCloudModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-950/40 px-3.5 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-900/50 transition"
+              title="24/7 Cloud Engine Status & Keep-Alive Settings"
+            >
+              <Cloud className="h-3.5 w-3.5" />
+              <span>24/7 Cloud Setup</span>
+            </button>
+
             {onStartLiveCampaign && (
               <button
                 onClick={onStartLiveCampaign}
@@ -611,12 +660,21 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
         </div>
       )}
 
-      {/* OPEN ACTIVE POSITIONS TABLE */}
+      {/* OPEN ACTIVE POSITIONS - FULL DETAILS TABLE */}
       <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-blue-600" />
             <h3 className="text-sm font-bold text-stone-900">Active Live Positions ({positions.length})</h3>
+            {positions.length > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                </span>
+                Live MTM Active
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onOpenAlertSettings && (
@@ -644,70 +702,203 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
             No open positions currently. Click <strong>"Run 7-Day Cycle"</strong> above to let the bot initiate high-conviction trades automatically.
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2.5 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                  Live Compounding
-                </span>
-                <span className="text-stone-600">
-                  Active Exposure: <strong className="font-mono text-stone-900">₹{positions.reduce((s, p) => s + (p.fill_price * p.shares), 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-stone-500 font-medium">Unrealized MTM:</span>
-                <span className={`font-mono text-sm font-black ${totalUnrealizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {totalUnrealizedPnl >= 0 ? '+' : ''}₹{totalUnrealizedPnl.toFixed(2)}
-                </span>
-              </div>
-            </div>
+          <div className="space-y-4">
+            {/* Live Portfolio Active Metrics Summary Cards */}
+            {(() => {
+              const totalInvested = positions.reduce((s, p) => s + (p.fill_price * p.shares), 0);
+              const totalCurrentVal = positions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
+              const totalRiskRupees = positions.reduce((s, p) => s + (p.rupee_risk || Math.max(0, Math.abs(p.fill_price - p.stop_loss) * p.shares)), 0);
+              const avgRR = positions.length > 0
+                ? positions.reduce((s, p) => {
+                    const risk = Math.abs(p.fill_price - p.stop_loss) || 1;
+                    const reward = Math.abs(p.target_price - p.fill_price);
+                    return s + (reward / risk);
+                  }, 0) / positions.length
+                : 0;
 
-            <div className="overflow-x-auto">
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Active Exposure</span>
+                    <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
+                      ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </p>
+                    <span className="text-[10px] text-stone-500">{positions.length} active trade{positions.length === 1 ? '' : 's'}</span>
+                  </div>
+
+                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Current Market Value</span>
+                    <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
+                      ₹{totalCurrentVal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </p>
+                    <span className="text-[10px] text-stone-500">Live mark-to-market</span>
+                  </div>
+
+                  <div className={`rounded-xl border p-3 ${totalUnrealizedPnl >= 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'}`}>
+                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Unrealized MTM P&L</span>
+                    <p className={`mt-0.5 font-mono text-base font-black ${totalUnrealizedPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      {totalUnrealizedPnl >= 0 ? '+' : ''}₹{totalUnrealizedPnl.toFixed(2)}
+                      <span className="ml-1 text-xs font-bold">
+                        ({totalInvested > 0 ? ((totalUnrealizedPnl / totalInvested) * 100).toFixed(2) : '0.00'}%)
+                      </span>
+                    </p>
+                    <span className="text-[10px] text-stone-500">Net floating balance</span>
+                  </div>
+
+                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Total Risk at Stake</span>
+                    <p className="mt-0.5 font-mono text-base font-bold text-rose-600">
+                      ₹{totalRiskRupees.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </p>
+                    <span className="text-[10px] text-stone-500">Hard stop-loss bound</span>
+                  </div>
+
+                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Avg Risk:Reward</span>
+                    <p className="mt-0.5 font-mono text-base font-bold text-blue-600">
+                      {avgRR.toFixed(2)} : 1
+                    </p>
+                    <span className="text-[10px] text-stone-500">System expectancy</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Comprehensive Active Positions Table */}
+            <div className="overflow-x-auto rounded-xl border border-stone-200">
               <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-stone-200 text-stone-400 uppercase text-[10px] tracking-wider">
-                    <th className="pb-2 font-semibold">Stock</th>
-                    <th className="pb-2 font-semibold">Action</th>
-                    <th className="pb-2 font-semibold">Shares</th>
-                    <th className="pb-2 font-semibold">Entry Fill</th>
-                    <th className="pb-2 font-semibold">Live Price</th>
-                    <th className="pb-2 font-semibold">Stop Loss</th>
-                    <th className="pb-2 font-semibold">Target</th>
-                    <th className="pb-2 font-semibold">Unrealized P&L</th>
-                    <th className="pb-2 font-semibold text-right">Action</th>
+                <thead className="bg-stone-50/90 border-b border-stone-200 text-stone-500 uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3 font-semibold">Stock / Order</th>
+                    <th className="py-2.5 px-3 font-semibold">Action</th>
+                    <th className="py-2.5 px-3 font-semibold">Size & Exposure</th>
+                    <th className="py-2.5 px-3 font-semibold">Entry Fill</th>
+                    <th className="py-2.5 px-3 font-semibold">Live Price (CMP)</th>
+                    <th className="py-2.5 px-3 font-semibold">Stop Loss</th>
+                    <th className="py-2.5 px-3 font-semibold">Target Price</th>
+                    <th className="py-2.5 px-3 font-semibold">R:R & Risk ₹</th>
+                    <th className="py-2.5 px-3 font-semibold">Target Progress</th>
+                    <th className="py-2.5 px-3 font-semibold">Unrealized P&L</th>
+                    <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-stone-100">
+                <tbody className="divide-y divide-stone-100 bg-white">
                   {positions.map((pos) => {
-                    const pnl = pos.unrealized_pnl || 0;
-                    const pnlPct = pos.unrealized_pnl_pct || 0;
+                    const currentPrice = pos.current_price || pos.fill_price;
+                    const pnl = pos.unrealized_pnl ?? ((currentPrice - pos.fill_price) * pos.shares * (pos.action === 'BUY' ? 1 : -1));
+                    const pnlPct = pos.unrealized_pnl_pct ?? (pos.fill_price > 0 ? (pnl / (pos.fill_price * pos.shares)) * 100 : 0);
+                    const positionExposure = pos.fill_price * pos.shares;
+                    const currentVal = currentPrice * pos.shares;
+                    const priceChangePct = pos.fill_price > 0 ? ((currentPrice - pos.fill_price) / pos.fill_price) * 100 : 0;
+                    const slDistPct = pos.fill_price > 0 ? Math.abs((pos.stop_loss - currentPrice) / currentPrice) * 100 : 0;
+                    const tgtDistPct = pos.fill_price > 0 ? Math.abs((pos.target_price - currentPrice) / currentPrice) * 100 : 0;
+
+                    // Progress calculation towards target (0% at SL, 100% at Target)
+                    const totalRange = Math.abs(pos.target_price - pos.stop_loss) || 1;
+                    const currentProg = pos.action === 'BUY'
+                      ? Math.min(100, Math.max(0, ((currentPrice - pos.stop_loss) / totalRange) * 100))
+                      : Math.min(100, Math.max(0, ((pos.stop_loss - currentPrice) / totalRange) * 100));
+
+                    const riskPerShare = Math.abs(pos.fill_price - pos.stop_loss);
+                    const rewardPerShare = Math.abs(pos.target_price - pos.fill_price);
+                    const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(2) : '2.0';
+                    const maxRiskRupees = pos.rupee_risk || (riskPerShare * pos.shares);
+
                     return (
-                      <tr key={pos.order_id} className="hover:bg-stone-50/50 transition">
-                        <td className="py-2.5 font-bold text-stone-900">{pos.ticker}</td>
-                        <td className="py-2.5">
-                          <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                      <tr key={pos.order_id} className="hover:bg-stone-50/70 transition">
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-stone-900 flex items-center gap-1.5">
+                            {pos.ticker}
+                            {onSelectTickerForPipeline && (
+                              <button
+                                onClick={() => onSelectTickerForPipeline(pos.ticker)}
+                                className="text-stone-400 hover:text-blue-600 transition"
+                                title="Inspect in Pipeline & Radar"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                          <span className="font-mono text-[10px] text-stone-400">
+                            {pos.order_id.slice(0, 16)}...
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ${
                             pos.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                           }`}>
+                            {pos.action === 'BUY' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
                             {pos.action}
                           </span>
                         </td>
-                        <td className="py-2.5 font-mono">{pos.shares}</td>
-                        <td className="py-2.5 font-mono">₹{pos.fill_price}</td>
-                        <td className="py-2.5 font-mono font-bold text-stone-900">₹{pos.current_price || pos.fill_price}</td>
-                        <td className="py-2.5 font-mono text-rose-600">₹{pos.stop_loss}</td>
-                        <td className="py-2.5 font-mono text-emerald-600">₹{pos.target_price}</td>
-                        <td className="py-2.5 font-mono font-bold">
-                          <span className={pnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-                            {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct}%)
-                          </span>
+                        <td className="py-3 px-3">
+                          <div className="font-mono font-semibold text-stone-900">{pos.shares} shares</div>
+                          <div className="font-mono text-[10px] text-stone-500">₹{positionExposure.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
                         </td>
-                        <td className="py-2.5 text-right">
+                        <td className="py-3 px-3 font-mono font-medium text-stone-800">
+                          ₹{pos.fill_price.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-mono font-bold text-stone-900">
+                            ₹{currentPrice.toFixed(2)}
+                          </div>
+                          <div className={`font-mono text-[10px] ${priceChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-mono font-semibold text-rose-600">
+                            ₹{pos.stop_loss.toFixed(2)}
+                          </div>
+                          <div className="text-[10px] text-stone-400">
+                            {slDistPct.toFixed(1)}% away
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-mono font-semibold text-emerald-600">
+                            ₹{pos.target_price.toFixed(2)}
+                          </div>
+                          <div className="text-[10px] text-stone-400">
+                            {tgtDistPct.toFixed(1)}% away
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-mono font-medium text-blue-600 text-[11px]">
+                            {rrRatio}:1 R:R
+                          </div>
+                          <div className="font-mono text-[10px] text-stone-500">
+                            ₹{maxRiskRupees.toFixed(0)} risk
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 min-w-[120px]">
+                          <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 mb-1">
+                            <span>SL</span>
+                            <span className="font-bold text-stone-700">{currentProg.toFixed(0)}%</span>
+                            <span>TGT</span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-300 ${
+                                pnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${currentProg}%` }}
+                            />
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className={`font-mono text-xs font-black ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                          </div>
+                          <div className={`font-mono text-[10px] font-bold ${pnlPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            {pnlPct >= 0 ? '+' : ''}{Number(pnlPct).toFixed(2)}%
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-right">
                           <button
                             onClick={() => handleOpenCloseModal(pos)}
-                            className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-100 transition shadow-2xs"
+                            className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-900 hover:text-white transition shadow-2xs whitespace-nowrap"
                           >
-                            Close Position
+                            Close Trade
                           </button>
                         </td>
                       </tr>
@@ -846,6 +1037,133 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
                 className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
               >
                 {isSubmittingClose ? 'Recording Post-Mortem...' : 'Execute Close & Learn'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 24/7 CLOUD SETUP & KEEP-ALIVE MODAL */}
+      {showCloudModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-stone-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-stone-200">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-sky-100 flex items-center justify-center text-sky-700">
+                  <Cloud className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-stone-900">24/7 Autonomous Cloud Engine Configuration</h3>
+                  <p className="text-xs text-stone-500">Zero-loss persistence and continuous background operation in Cloud Run</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCloudModal(false)}
+                className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4 text-xs">
+              {/* Feature 1: Disk State Persistence */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <h4 className="font-bold text-emerald-900">1. Disk State Persistence (Active)</h4>
+                </div>
+                <p className="mt-1 text-emerald-800 leading-relaxed">
+                  Every position entry, defensive stop exit, profit target, and Reinforcement Learning weight update is written immediately to disk at <code className="font-mono bg-emerald-100 px-1 py-0.5 rounded text-emerald-900">/data/portfolio_state.json</code>.
+                  Even if the Cloud Run container restarts or cold-starts after sleeping, all active trades and campaign statistics are instantly restored.
+                </p>
+              </div>
+
+              {/* Feature 2: 24/7 Keep-Alive Webhook */}
+              <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Server className="h-4 w-4 text-sky-700" />
+                    <h4 className="font-bold text-sky-900">2. Keep-Alive & Autonomous Pulse Webhook</h4>
+                  </div>
+                  <span className="rounded-full bg-sky-200/80 px-2 py-0.5 text-[10px] font-bold text-sky-800 uppercase tracking-wide">
+                    Ready
+                  </span>
+                </div>
+                <p className="text-sky-800 leading-relaxed">
+                  Call this webhook endpoint to keep the container awake 24/7. Each ping evaluates live stop losses, profit targets, and executes fresh algorithmic entries:
+                </p>
+
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-amber-900 text-[11px] leading-relaxed">
+                  <strong>Important Note (Fixing 404):</strong> The <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">ais-pre-...</code> domain is activated when you click the <strong>&quot;Share&quot;</strong> button at the top-right of AI Studio. Before the app is shared for the first time, Cloud Run returns a 404 because no public deployment revision exists yet. Clicking <strong>&quot;Share&quot;</strong> publishes the revision and immediately makes this webhook reachable!
+                </div>
+
+                <div className="flex items-center gap-2 rounded-lg bg-white border border-sky-200 p-2 font-mono text-[11px] text-stone-800">
+                  <span className="truncate select-all flex-1">
+                    https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/autonomous/pulse
+                  </span>
+                  <button
+                    onClick={() => handleCopyUrl("https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/autonomous/pulse")}
+                    className="inline-flex items-center gap-1 rounded bg-sky-100 hover:bg-sky-200 text-sky-800 px-2 py-1 text-xs font-sans font-semibold transition shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedUrl ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                    <span>{copiedUrl ? 'Copied!' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-stone-500 text-[11px]">Test the live cloud pulse directly from this browser:</span>
+                  <button
+                    onClick={handleTestPing}
+                    disabled={isPingingCloud}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 text-xs font-bold shadow-sm transition disabled:opacity-50"
+                  >
+                    <Activity className={`h-3.5 w-3.5 ${isPingingCloud ? 'animate-spin' : ''}`} />
+                    <span>{isPingingCloud ? 'Pinging Cloud...' : 'Send Test Keep-Alive Ping'}</span>
+                  </button>
+                </div>
+
+                {cloudPingResult && (
+                  <div className="rounded-lg bg-stone-900 text-stone-200 p-3 font-mono text-[11px] overflow-x-auto">
+                    <div className="flex justify-between text-stone-400 mb-1">
+                      <span>Server Response:</span>
+                      <span className="text-emerald-400 font-bold">{cloudPingResult.status}</span>
+                    </div>
+                    <pre className="whitespace-pre-wrap">{JSON.stringify(cloudPingResult, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Feature 3: Two Methods to run 24/7 */}
+              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2">
+                <h4 className="font-bold text-stone-900 flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5 text-amber-500" />
+                  Two Easy Options for 24/7 Non-Stop Execution:
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-1">
+                    <p className="font-bold text-stone-800">Method A: Free Scheduled Ping</p>
+                    <p className="text-stone-600 text-[11px] leading-relaxed">
+                      Register a free cron check at <strong>cron-job.org</strong> or <strong>UptimeRobot</strong> to send a GET request to the webhook URL above every <strong>5 minutes</strong>. This keeps Cloud Run warm with zero infrastructure cost.
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-1">
+                    <p className="font-bold text-stone-800">Method B: Cloud Run Min-Instances = 1</p>
+                    <p className="text-stone-600 text-[11px] leading-relaxed">
+                      In the Google Cloud Console, navigate to Cloud Run, click &quot;Edit & Deploy Revision&quot;, and set <strong>Minimum instances to 1</strong> (instead of 0). The engine will execute its 25-second trading loop permanently.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCloudModal(false)}
+                className="rounded-xl bg-stone-900 px-5 py-2 text-xs font-semibold text-white hover:bg-stone-800 transition"
+              >
+                Close Window
               </button>
             </div>
           </div>

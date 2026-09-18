@@ -670,6 +670,7 @@ export default function App() {
             positions={positions}
             onClosePosition={handleClosePosition}
             onViewPortfolio={() => setActiveTab('portfolio')}
+            onViewTransactions={() => setActiveTab('transactions')}
             onOpenAlertSettings={() => setShowAlertSettings(true)}
             alertThresholds={{ profitPct: thresholds.profitPct, lossPct: thresholds.lossPct }}
           />
@@ -833,6 +834,7 @@ export default function App() {
             openPositions={positions}
             onRefresh={fetchTransactions}
             onSelectTickerForPipeline={handleSelectStockForPipeline}
+            onClosePosition={handleClosePosition}
           />
         )}
 

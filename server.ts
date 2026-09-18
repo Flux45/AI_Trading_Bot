@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -33,7 +34,7 @@ import { STOCK_UNIVERSE, STOCK_UNIVERSE_MAP } from "./src/data/universe.ts";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
@@ -1488,6 +1489,7 @@ Stop Loss was: ₹${pos.stop_loss}, Target was: ₹${pos.target_price}`,
 
   // Recalculate complete portfolio ledger & cash
   const accounting = getPortfolioAccounting();
+  saveStateToDisk();
 
   res.json({
     success: true,
@@ -1572,6 +1574,63 @@ let autonomousDaemonStatus: AutonomousDaemonStatus = {
   campaign: currentLiveCampaign,
   adaptiveModel: adaptiveTradingModel,
 };
+
+// 24/7 Cloud Persistence Store: Saves portfolio, trades, campaign, & AI weights to disk
+const STATE_FILE_PATH = path.join(process.cwd(), "data", "portfolio_state.json");
+
+function saveStateToDisk() {
+  try {
+    const dir = path.dirname(STATE_FILE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const payload = {
+      savedAt: new Date().toISOString(),
+      executedPositions,
+      tradeHistory,
+      transactionsLedger,
+      currentLiveCampaign,
+      adaptiveTradingModel,
+      lastActionSummary: autonomousDaemonStatus.lastActionSummary,
+    };
+    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(payload, null, 2), "utf-8");
+  } catch (err: any) {
+    console.warn("[Persistence] Failed to save state to disk:", err?.message || err);
+  }
+}
+
+function loadStateFromDisk() {
+  try {
+    if (fs.existsSync(STATE_FILE_PATH)) {
+      const raw = fs.readFileSync(STATE_FILE_PATH, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.executedPositions)) {
+        executedPositions = parsed.executedPositions;
+      }
+      if (Array.isArray(parsed.tradeHistory)) {
+        tradeHistory = parsed.tradeHistory;
+      }
+      if (Array.isArray(parsed.transactionsLedger) && parsed.transactionsLedger.length > 0) {
+        transactionsLedger = parsed.transactionsLedger;
+      }
+      if (parsed.currentLiveCampaign && parsed.currentLiveCampaign.campaignId) {
+        currentLiveCampaign = { ...currentLiveCampaign, ...parsed.currentLiveCampaign };
+      }
+      if (parsed.adaptiveTradingModel && parsed.adaptiveTradingModel.strategyWeights) {
+        adaptiveTradingModel = { ...adaptiveTradingModel, ...parsed.adaptiveTradingModel };
+      }
+      if (parsed.lastActionSummary) {
+        autonomousDaemonStatus.lastActionSummary = parsed.lastActionSummary;
+      }
+      console.log(`[Persistence] Restored 24/7 cloud state (${executedPositions.length} active positions, ${tradeHistory.length} closed trades)`);
+    }
+  } catch (err: any) {
+    console.warn("[Persistence] Failed to load state from disk:", err?.message || err);
+  }
+}
+
+// Immediately restore state on container boot
+loadStateFromDisk();
 
 // Reinforcement Learning: Update weights and calibrate parameters after each trade outcome
 function learnFromTradeOutcome(record: TradeHistoryRecord, ticker: string) {
@@ -1665,6 +1724,7 @@ function learnFromTradeOutcome(record: TradeHistoryRecord, ticker: string) {
   }
 
   adaptiveTradingModel.learningProgressSummary = `Learned from ${adaptiveTradingModel.totalExperiences} live trades. Win Rate: ${adaptiveTradingModel.winRate}%. ATR Buffer: ${adaptiveTradingModel.calibratedParameters.atrStopMultiplier}x. Model actively avoiding repeat drawdowns.`;
+  saveStateToDisk();
 }
 
 // Function: Reset everything to zero with specific starting capital
@@ -1731,6 +1791,7 @@ function resetEverythingToZero(startingCapital: number = 50000.0) {
     adaptiveModel: adaptiveTradingModel,
   };
 
+  saveStateToDisk();
   return accounting;
 }
 
@@ -1739,6 +1800,7 @@ function startLive7DayCampaign(startingCapital: number = 50000.0) {
   const accounting = resetEverythingToZero(startingCapital);
   currentLiveCampaign.status = "ACTIVE";
   autonomousDaemonStatus.lastActionSummary = `Live 7-Day Autonomous Campaign active (Day 1 of 7). Zero price bias. Taking real-time trades with adaptive learning.`;
+  saveStateToDisk();
   return accounting;
 }
 
@@ -1912,6 +1974,7 @@ async function executeLiveAutonomousScanAndTrade(reason: string = "Routine Marke
   autonomousDaemonStatus.tradesCount = currentLiveCampaign.totalTradesExecuted;
   autonomousDaemonStatus.lastActionSummary = `[LIVE DAY ${currentLiveCampaign.currentDay}/7] Bought ${shares} shares of ${bestCandidate.item.ticker} at ₹${fillPrice}. Risk: ₹${rupeeRisk} (${bestCandidate.riskReward}:1 R:R).`;
 
+  saveStateToDisk();
   return newPosition;
 }
 
@@ -2723,6 +2786,48 @@ app.post("/api/portfolio/reset", (req, res) => {
   res.json({ success: true, capital: accounting.liquidCash, accounting });
 });
 
+// 24/7 Cloud Execution & Keep-Alive Webhook Endpoint
+// Compatible with Cloud Scheduler, UptimeRobot, cron-job.org, or standard HTTP GET/POST pings
+app.all(["/api/autonomous/pulse", "/api/keep-alive"], async (req, res) => {
+  try {
+    autonomousDaemonStatus.lastPulseTime = new Date().toISOString();
+
+    if (executedPositions.length > 0) {
+      await refreshOpenPositions();
+    }
+
+    let tradeOpened: ExecutedPosition | null = null;
+    if (autonomousDaemonStatus.isRunning && executedPositions.length < adaptiveTradingModel.calibratedParameters.maxOpenPositions) {
+      tradeOpened = await executeLiveAutonomousScanAndTrade("Cloud 24/7 Keep-Alive Ping");
+    }
+
+    saveStateToDisk();
+
+    const accounting = getPortfolioAccounting();
+
+    res.json({
+      status: "ACTIVE",
+      serverTimestamp: new Date().toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+      diskPersistence: "ENABLED",
+      daemonRunning: autonomousDaemonStatus.isRunning,
+      activePositionsCount: executedPositions.length,
+      currentDay: currentLiveCampaign.currentDay,
+      liquidCash: accounting.liquidCash,
+      totalEquity: accounting.totalEquity,
+      newTradeExecuted: Boolean(tradeOpened),
+      lastAction: autonomousDaemonStatus.lastActionSummary,
+      cloudInstructions: {
+        keepAliveMethod: "HTTP GET/POST ping every 5-10 minutes keeps container permanently active without sleep",
+        webhookUrl: "https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/autonomous/pulse",
+        cloudRunMinInstancesSetting: "Set Minimum number of instances = 1 in GCP Console for 24/7 zero-downtime execution",
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ status: "ERROR", error: err?.message || "Pulse failed" });
+  }
+});
+
 // Periodic Autonomous Background Evaluator (Runs every 25 seconds)
 setInterval(async () => {
   if (!autonomousDaemonStatus.isRunning) return;
@@ -2853,6 +2958,8 @@ setInterval(async () => {
     if (autonomousDaemonStatus.isRunning && executedPositions.length < adaptiveTradingModel.calibratedParameters.maxOpenPositions) {
       await executeLiveAutonomousScanAndTrade("Periodic autonomous pulse");
     }
+
+    saveStateToDisk();
   } catch (err: any) {
     console.error("[Autonomous Daemon] Pulse exception:", err?.message || err);
   }

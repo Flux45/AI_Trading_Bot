@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowDownRight,
   Download,
   Filter,
   Search,
@@ -16,6 +17,12 @@ import {
   TrendingDown,
   Trash2,
   Activity,
+  XCircle,
+  Target,
+  ShieldAlert,
+  Eye,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import type { TransactionRecord, ExecutedPosition, SystemConfig } from '../types';
 
@@ -25,6 +32,7 @@ interface TransactionHistoryProps {
   onRefresh: () => Promise<void>;
   onClearLedger?: () => Promise<void>;
   onSelectTickerForPipeline?: (ticker: string) => void;
+  onClosePosition?: (orderId: string, exitPrice: number) => Promise<void>;
 }
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
@@ -33,12 +41,38 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   onRefresh,
   onClearLedger,
   onSelectTickerForPipeline,
+  onClosePosition,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'ENTRIES' | 'EXITS'>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showActiveDetails, setShowActiveDetails] = useState(true);
+  const [closingPos, setClosingPos] = useState<ExecutedPosition | null>(null);
+  const [exitPriceInput, setExitPriceInput] = useState<string>('');
+  const [isSubmittingClose, setIsSubmittingClose] = useState(false);
+
+  const handleOpenCloseModal = (pos: ExecutedPosition) => {
+    setClosingPos(pos);
+    setExitPriceInput((pos.current_price || pos.fill_price).toString());
+  };
+
+  const handleConfirmClose = async () => {
+    if (!closingPos || !onClosePosition) return;
+    const price = parseFloat(exitPriceInput);
+    if (isNaN(price) || price <= 0) return;
+    setIsSubmittingClose(true);
+    try {
+      await onClosePosition(closingPos.order_id, price);
+      setClosingPos(null);
+      await onRefresh();
+    } catch (err) {
+      console.error('Failed to close trade from transactions tab:', err);
+    } finally {
+      setIsSubmittingClose(false);
+    }
+  };
 
   // Helper to resolve active trade details (from live openPositions prop or enriched txn)
   const getActivePositionData = (txn: TransactionRecord) => {
@@ -299,6 +333,276 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </span>
         </div>
       </div>
+
+      {/* DEDICATED ACTIVE TRADES & LIVE P&L FULL DETAILS LEDGER */}
+      {openPositions && openPositions.length > 0 && (
+        <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
+                <Activity className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-stone-900">
+                    Active Trades & Live P&L — Full Details Ledger ({openPositions.length})
+                  </h3>
+                  <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </span>
+                    Live Mark-to-Market
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500">
+                  Comprehensive live surveillance of current open positions, risk boundaries, real-time CMP, and unrealized floating P&L.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStatusFilter('ACTIVE')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 transition shadow-2xs"
+              >
+                <Filter className="h-3 w-3 text-stone-500" />
+                Filter Table to Active
+              </button>
+              <button
+                onClick={() => setShowActiveDetails(!showActiveDetails)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 transition shadow-2xs"
+              >
+                {showActiveDetails ? (
+                  <>
+                    <ChevronUp className="h-3.5 w-3.5" />
+                    <span>Collapse</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                    <span>Expand Details</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {showActiveDetails && (
+            <>
+              {/* Active Portfolio Metrics */}
+              {(() => {
+                const totalInvested = openPositions.reduce((s, p) => s + (p.fill_price * p.shares), 0);
+                const totalCurrentVal = openPositions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
+                const totalUnrealized = openPositions.reduce((s, p) => {
+                  const cmp = p.current_price || p.fill_price;
+                  return s + (p.unrealized_pnl ?? ((cmp - p.fill_price) * p.shares * (p.action === 'BUY' ? 1 : -1)));
+                }, 0);
+                const totalRiskRupees = openPositions.reduce((s, p) => s + (p.rupee_risk || Math.max(0, Math.abs(p.fill_price - p.stop_loss) * p.shares)), 0);
+                const avgRR = openPositions.length > 0
+                  ? openPositions.reduce((s, p) => {
+                      const risk = Math.abs(p.fill_price - p.stop_loss) || 1;
+                      const reward = Math.abs(p.target_price - p.fill_price);
+                      return s + (reward / risk);
+                    }, 0) / openPositions.length
+                  : 0;
+
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Active Exposure</span>
+                      <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
+                        ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </p>
+                      <span className="text-[10px] text-stone-500">{openPositions.length} active trade{openPositions.length === 1 ? '' : 's'}</span>
+                    </div>
+
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Current Market Value</span>
+                      <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
+                        ₹{totalCurrentVal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </p>
+                      <span className="text-[10px] text-stone-500">Live mark-to-market</span>
+                    </div>
+
+                    <div className={`rounded-xl border p-3 ${totalUnrealized >= 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'}`}>
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Unrealized MTM P&L</span>
+                      <p className={`mt-0.5 font-mono text-base font-black ${totalUnrealized >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {totalUnrealized >= 0 ? '+' : ''}₹{totalUnrealized.toFixed(2)}
+                        <span className="ml-1 text-xs font-bold">
+                          ({totalInvested > 0 ? ((totalUnrealized / totalInvested) * 100).toFixed(2) : '0.00'}%)
+                        </span>
+                      </p>
+                      <span className="text-[10px] text-stone-500">Net floating balance</span>
+                    </div>
+
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Total Risk at Stake</span>
+                      <p className="mt-0.5 font-mono text-base font-bold text-rose-600">
+                        ₹{totalRiskRupees.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </p>
+                      <span className="text-[10px] text-stone-500">Hard stop-loss bound</span>
+                    </div>
+
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Avg Risk:Reward</span>
+                      <p className="mt-0.5 font-mono text-base font-bold text-blue-600">
+                        {avgRR.toFixed(2)} : 1
+                      </p>
+                      <span className="text-[10px] text-stone-500">System expectancy</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Full Details Open Positions Table */}
+              <div className="overflow-x-auto rounded-xl border border-stone-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-50/90 border-b border-stone-200 text-stone-500 uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3 font-semibold">Stock / Order</th>
+                      <th className="py-2.5 px-3 font-semibold">Action</th>
+                      <th className="py-2.5 px-3 font-semibold">Size & Exposure</th>
+                      <th className="py-2.5 px-3 font-semibold">Entry Fill</th>
+                      <th className="py-2.5 px-3 font-semibold">Live Price (CMP)</th>
+                      <th className="py-2.5 px-3 font-semibold">Stop Loss</th>
+                      <th className="py-2.5 px-3 font-semibold">Target Price</th>
+                      <th className="py-2.5 px-3 font-semibold">R:R & Risk ₹</th>
+                      <th className="py-2.5 px-3 font-semibold">Target Progress</th>
+                      <th className="py-2.5 px-3 font-semibold">Unrealized P&L</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 bg-white font-mono">
+                    {openPositions.map((pos) => {
+                      const currentPrice = pos.current_price || pos.fill_price;
+                      const pnl = pos.unrealized_pnl ?? ((currentPrice - pos.fill_price) * pos.shares * (pos.action === 'BUY' ? 1 : -1));
+                      const pnlPct = pos.unrealized_pnl_pct ?? (pos.fill_price > 0 ? (pnl / (pos.fill_price * pos.shares)) * 100 : 0);
+                      const positionExposure = pos.fill_price * pos.shares;
+                      const priceChangePct = pos.fill_price > 0 ? ((currentPrice - pos.fill_price) / pos.fill_price) * 100 : 0;
+                      const slDistPct = pos.fill_price > 0 ? Math.abs((pos.stop_loss - currentPrice) / currentPrice) * 100 : 0;
+                      const tgtDistPct = pos.fill_price > 0 ? Math.abs((pos.target_price - currentPrice) / currentPrice) * 100 : 0;
+
+                      // Progress calculation towards target (0% at SL, 100% at Target)
+                      const totalRange = Math.abs(pos.target_price - pos.stop_loss) || 1;
+                      const currentProg = pos.action === 'BUY'
+                        ? Math.min(100, Math.max(0, ((currentPrice - pos.stop_loss) / totalRange) * 100))
+                        : Math.min(100, Math.max(0, ((pos.stop_loss - currentPrice) / totalRange) * 100));
+
+                      const riskPerShare = Math.abs(pos.fill_price - pos.stop_loss);
+                      const rewardPerShare = Math.abs(pos.target_price - pos.fill_price);
+                      const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(2) : '2.0';
+                      const maxRiskRupees = pos.rupee_risk || (riskPerShare * pos.shares);
+
+                      return (
+                        <tr key={pos.order_id} className="hover:bg-stone-50/70 transition">
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-stone-900 font-sans flex items-center gap-1.5">
+                              {pos.ticker}
+                              {onSelectTickerForPipeline && (
+                                <button
+                                  onClick={() => onSelectTickerForPipeline(pos.ticker)}
+                                  className="text-stone-400 hover:text-blue-600 transition"
+                                  title="Inspect in Pipeline & Radar"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                            <span className="font-mono text-[10px] text-stone-400">
+                              {pos.order_id.slice(0, 16)}...
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold font-sans ${
+                              pos.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {pos.action === 'BUY' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                              {pos.action}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-mono font-semibold text-stone-900">{pos.shares} shares</div>
+                            <div className="font-mono text-[10px] text-stone-500">₹{positionExposure.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                          </td>
+                          <td className="py-3 px-3 font-mono font-medium text-stone-800">
+                            ₹{pos.fill_price.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-mono font-bold text-stone-900">
+                              ₹{currentPrice.toFixed(2)}
+                            </div>
+                            <div className={`font-mono text-[10px] ${priceChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-mono font-semibold text-rose-600">
+                              ₹{pos.stop_loss.toFixed(2)}
+                            </div>
+                            <div className="text-[10px] text-stone-400 font-sans">
+                              {slDistPct.toFixed(1)}% away
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-mono font-semibold text-emerald-600">
+                              ₹{pos.target_price.toFixed(2)}
+                            </div>
+                            <div className="text-[10px] text-stone-400 font-sans">
+                              {tgtDistPct.toFixed(1)}% away
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-mono font-medium text-blue-600 text-[11px]">
+                              {rrRatio}:1 R:R
+                            </div>
+                            <div className="font-mono text-[10px] text-stone-500">
+                              ₹{maxRiskRupees.toFixed(0)} risk
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 min-w-[120px]">
+                            <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 mb-1">
+                              <span>SL</span>
+                              <span className="font-bold text-stone-700">{currentProg.toFixed(0)}%</span>
+                              <span>TGT</span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-300 ${
+                                  pnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${currentProg}%` }}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className={`font-mono text-xs font-black ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
+                            </div>
+                            <div className={`font-mono text-[10px] font-bold ${pnlPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {pnlPct >= 0 ? '+' : ''}{Number(pnlPct).toFixed(2)}%
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            {onClosePosition && (
+                              <button
+                                onClick={() => handleOpenCloseModal(pos)}
+                                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-900 hover:text-white transition shadow-2xs whitespace-nowrap font-sans"
+                              >
+                                Close Trade
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Controls & Filter Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
@@ -606,6 +910,118 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Close Position Modal */}
+      {closingPos && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600">
+                  <XCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">Close Position: {closingPos.ticker}</h3>
+                  <p className="text-[11px] text-stone-500">Order ID: {closingPos.order_id.slice(0, 16)}...</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setClosingPos(null)}
+                className="text-stone-400 hover:text-stone-600 transition"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between text-stone-600">
+                <span>Side / Quantity:</span>
+                <span className="font-mono font-bold text-stone-900">{closingPos.action} {closingPos.shares} shares</span>
+              </div>
+              <div className="flex justify-between text-stone-600">
+                <span>Entry Fill Price:</span>
+                <span className="font-mono font-bold text-stone-900">₹{closingPos.fill_price.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-stone-600">
+                <span>Stop Loss / Target:</span>
+                <span className="font-mono text-stone-700">₹{closingPos.stop_loss} / ₹{closingPos.target_price}</span>
+              </div>
+              <div className="flex justify-between text-stone-600">
+                <span>Current Market Price:</span>
+                <span className="font-mono font-bold text-blue-600">₹{(closingPos.current_price || closingPos.fill_price).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Execution Exit Price (₹)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  step="0.05"
+                  value={exitPriceInput}
+                  onChange={(e) => setExitPriceInput(e.target.value)}
+                  className="w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-mono text-stone-900 focus:border-stone-400 focus:bg-white focus:outline-none"
+                  placeholder="Enter exit price"
+                />
+                <button
+                  type="button"
+                  onClick={() => setExitPriceInput((closingPos.current_price || closingPos.fill_price).toString())}
+                  className="whitespace-nowrap rounded-lg border border-stone-200 bg-stone-100 px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition"
+                >
+                  Use CMP
+                </button>
+              </div>
+            </div>
+
+            {/* Simulated Outcome Preview */}
+            {(() => {
+              const exitP = parseFloat(exitPriceInput);
+              if (!isNaN(exitP) && exitP > 0) {
+                const simulatedPnl = (exitP - closingPos.fill_price) * closingPos.shares * (closingPos.action === 'BUY' ? 1 : -1);
+                const simulatedPnlPct = (simulatedPnl / (closingPos.fill_price * closingPos.shares)) * 100;
+                return (
+                  <div className={`rounded-xl border p-3 text-xs ${simulatedPnl >= 0 ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'}`}>
+                    <div className="flex justify-between font-medium text-stone-600">
+                      <span>Simulated Realized P&L:</span>
+                      <span className={`font-mono font-bold ${simulatedPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {simulatedPnl >= 0 ? '+' : ''}₹{simulatedPnl.toFixed(2)} ({simulatedPnlPct >= 0 ? '+' : ''}{simulatedPnlPct.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setClosingPos(null)}
+                className="rounded-lg border border-stone-200 bg-stone-100 px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClose}
+                disabled={isSubmittingClose || !exitPriceInput || parseFloat(exitPriceInput) <= 0}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 transition disabled:opacity-50 shadow-xs flex items-center gap-1.5"
+              >
+                {isSubmittingClose ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Executing Exit...</span>
+                  </>
+                ) : (
+                  <span>Confirm & Close Position</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
