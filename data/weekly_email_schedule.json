@@ -1,0 +1,66 @@
+{
+  "config": {
+    "enabled": true,
+    "recipientEmail": "aayyuusshh.45@gmail.com",
+    "dayOfWeek": "FRIDAY",
+    "timeOfDay": "15:30",
+    "timeZone": "Asia/Kolkata",
+    "includeStrategies": true,
+    "includePnlSnapshots": true,
+    "includeOpenPositions": true,
+    "includeClosedTrades": true,
+    "includeLessons": true,
+    "lastStatus": "SUCCESS",
+    "lastStatusMessage": "Weekly PDF report (10 KB) generated and delivered to trader@quantbot.advance.",
+    "nextScheduledAt": "2026-10-16T10:00:00.000Z",
+    "lastSentAt": "2026-10-12T08:46:24.084Z",
+    "lastPreviewUrl": "https://ethereal.email/message/asyeYHUsMI1tJS91asyeZrJrKujo9WgFAAAAAcBalFKnJoiiEpKsomdbzlc"
+  },
+  "history": [
+    {
+      "id": "DISPATCH_1791794790293",
+      "timestamp": "2026-10-12T08:46:24.084Z",
+      "recipient": "trader@quantbot.advance",
+      "status": "SUCCESS",
+      "subject": "[TEST] Weekly Strategy Returns & P&L Snapshot — AI BOT ADVANCE (12/10/2026)",
+      "pdfSizeBytes": 10707,
+      "pdfFilename": "AI_BOT_ADVANCE_Weekly_Strategy_Audit_Report.pdf",
+      "messageId": "<ff7a908e-f366-c870-7a7c-2bb143777568@quant-bot-advance.nse>",
+      "previewUrl": "https://ethereal.email/message/asyeYHUsMI1tJS91asyeZrJrKujo9WgFAAAAAcBalFKnJoiiEpKsomdbzlc",
+      "isTestRun": true,
+      "summary": {
+        "totalEquity": 37236.29,
+        "liquidCash": 25293.79,
+        "unrealizedPnl": 153.85,
+        "realizedPnl": -12917.56,
+        "activePositionsCount": 1,
+        "closedTradesCount": 17,
+        "topStrategyName": "Quantum Synergy Ensemble: Multi-Factor Meta-Strategy",
+        "topStrategyReturnPct": 9.15
+      }
+    },
+    {
+      "id": "DISPATCH_1791794580060",
+      "timestamp": "2026-10-12T08:42:53.777Z",
+      "recipient": "test@quant.ai",
+      "status": "SUCCESS",
+      "subject": "[TEST] Weekly Strategy Returns & P&L Snapshot — AI BOT ADVANCE (12/10/2026)",
+      "pdfSizeBytes": 10700,
+      "pdfFilename": "AI_BOT_ADVANCE_Weekly_Strategy_Audit_Report.pdf",
+      "messageId": "<1f9235ec-809b-64d4-7bba-f35266d3da06@quant-bot-advance.nse>",
+      "previewUrl": "https://ethereal.email/message/asydjnUsMI1tJR3Casydk8AYPlgYixgGAAAAAYHIsckuVL2dN.Nh-dCiCWE",
+      "isTestRun": true,
+      "summary": {
+        "totalEquity": 37249.04,
+        "liquidCash": 25293.79,
+        "unrealizedPnl": 166.6,
+        "realizedPnl": -12917.56,
+        "activePositionsCount": 1,
+        "closedTradesCount": 17,
+        "topStrategyName": "Quantum Synergy Ensemble: Multi-Factor Meta-Strategy",
+        "topStrategyReturnPct": 9.15
+      }
+    }
+  ],
+  "updatedAt": "2026-10-12T08:46:30.293Z"
+}

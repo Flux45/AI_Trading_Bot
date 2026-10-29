@@ -17,52 +17,78 @@ import { ActiveTradesLivePnl } from './components/ActiveTradesLivePnl';
 import { SelectedStockHorizonCard } from './components/SelectedStockHorizonCard';
 import { DecisionReasoningView } from './components/DecisionReasoningView';
 import { MyStocksView } from './components/MyStocksView';
+import { AlgoResearchBot } from './components/AlgoResearchBot';
+import { TitansView } from './components/TitansView';
+import { AnalystHub } from './components/AnalystHub';
 import { ToastNotificationCenter } from './components/ToastNotificationCenter';
+import { HeartbeatSentinelModal } from './components/HeartbeatSentinelModal';
+import { TradesPdfReportModal } from './components/TradesPdfReportModal';
+import { StrategyInspectorModal } from './components/StrategyInspectorModal';
 import { usePnlAlerts } from './hooks/usePnlAlerts';
+import { useTheme } from './hooks/useTheme';
+import { useTradingState } from './hooks/useTradingState';
 import type {
-  SystemConfig,
   MarketContext,
   PipelineResult,
-  ExecutedPosition,
-  TradeHistoryRecord,
-  TransactionRecord,
-  ScannedStock,
-  MarketSentimentSummary,
   OrderTicket,
-  Autonomous7DaySummary,
-  AutonomousDaemonStatus,
-  PortfolioAccounting,
+  SystemConfig,
+  TradingHorizonMode,
 } from './types';
 
 const INITIAL_WATCHLIST = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK'];
 
 export default function App() {
+  const [theme, toggleTheme] = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('pipeline');
+  const [tradingMode, setTradingMode] = useState<TradingHorizonMode>('INTRADAY');
   const [watchlist, setWatchlist] = useState<string[]>(INITIAL_WATCHLIST);
   const [selectedTicker, setSelectedTicker] = useState<string>('RELIANCE');
   const [isRunning, setIsRunning] = useState<boolean>(false);
-
   const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
-  const [positions, setPositions] = useState<ExecutedPosition[]>([]);
-  const [tradeHistory, setTradeHistory] = useState<TradeHistoryRecord[]>([]);
 
-  // Transaction Ledger & Universe Scanner State
-  const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [scannedStocks, setScannedStocks] = useState<ScannedStock[]>([]);
-  const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [marketSentiment, setMarketSentiment] = useState<MarketSentimentSummary | null>(null);
-
-  // Autonomous 7-Day Trading Engine State
-  const [autonomousSummary, setAutonomousSummary] = useState<Autonomous7DaySummary | null>(null);
-  const [daemonStatus, setDaemonStatus] = useState<AutonomousDaemonStatus | null>(null);
-  const [isLoadingAutonomous, setIsLoadingAutonomous] = useState<boolean>(false);
-  const [accounting, setAccounting] = useState<PortfolioAccounting | null>(null);
-
-  // Live PnL Toast Notification Alert System
+  // Modals & User Feedback Toasts
   const [showAlertSettings, setShowAlertSettings] = useState<boolean>(false);
+  const [showHeartbeatModal, setShowHeartbeatModal] = useState<boolean>(false);
+  const [showPdfReportModal, setShowPdfReportModal] = useState<boolean>(false);
+  const [inspectingStrategyId, setInspectingStrategyId] = useState<string | null>(null);
+  const [analystSubTab, setAnalystSubTab] = useState<'catchup' | 'matrix' | 'trends' | 'scorecard' | 'stress_test' | 'ask' | 'history'>('catchup');
   const [isPlacingOrder, setIsPlacingOrder] = useState<boolean>(false);
   const [orderToast, setOrderToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Decoupled Trading State Service Hook (SOLID Principle)
+  const {
+    config,
+    setConfig,
+    positions,
+    setPositions,
+    tradeHistory,
+    setTradeHistory,
+    transactions,
+    scannedStocks,
+    isScanning,
+    marketSentiment,
+    autonomousSummary,
+    daemonStatus,
+    setDaemonStatus,
+    isLoadingAutonomous,
+    accounting,
+    fetchTransactions,
+    fetchTradeHistory,
+    fetchAccounting,
+    fetchMemoryAndPositions,
+    fetchAutonomousSummary,
+    handleRunUniverseScan,
+    handleClosePosition,
+    handleResetPortfolio,
+    handleRunAutonomous7Day,
+    handleToggleDaemon,
+    handleResetZero,
+    handleAddCustomTicker,
+    strategyMetrics,
+  } = useTradingState(tradingMode);
+
+  // P&L Alert Sounds & Threshold Monitoring
   const {
     alerts,
     thresholds,
@@ -72,169 +98,37 @@ export default function App() {
     triggerTestAlert,
   } = usePnlAlerts(positions);
 
-  const [config, setConfig] = useState<SystemConfig>({
-    credentials: {
-      geminiApiKeySet: false,
-    },
-    zerodha: {
-      apiKey: '',
-      apiSecret: '',
-      accessToken: '',
-      isConnected: false,
-    },
-    system: {
-      paperTradingMode: true,
-      initialPaperCapital: 50000.0,
-      currentPaperCapital: 50000.0,
-      maxRiskPerTradePct: 0.01,
-      maxPositionConcentration: 0.20,
-      defaultProductType: 'CNC',
-    },
-  });
-
-  // Fetch initial data
+  // Fetch initial market context for selected stock
   useEffect(() => {
-    const fetchInitialData = async () => {
+    const fetchContext = async () => {
       try {
-        // Fetch config
-        const configRes = await fetch('/api/config');
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          setConfig(configData);
+        const res = await fetch(`/api/market-context/${selectedTicker}?mode=${tradingMode}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMarketContext(data);
         }
-
-        // Fetch memory & positions
-        const memRes = await fetch('/api/memory');
-        if (memRes.ok) {
-          const memData = await memRes.json();
-          if (memData.openPositions) setPositions(memData.openPositions);
-          if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
-          if (memData.accounting) setAccounting(memData.accounting);
-        }
-
-        // Fetch dedicated canonical accounting
-        fetchAccounting();
-
-        // Fetch transaction audit ledger
-        fetchTransactions();
-
-        // Fetch market sentiment
-        fetchMarketSentiment();
-
-        // Fetch initial market context for initial ticker
-        const ctxRes = await fetch(`/api/market-context/${selectedTicker}`);
-        if (ctxRes.ok) {
-          const ctxData = await ctxRes.json();
-          setMarketContext(ctxData);
-        }
-
-        // Background initial scan of 40-stock universe
-        handleRunUniverseScan();
-
-        // Fetch Autonomous 7-Day Bot Summary
-        fetchAutonomousSummary();
       } catch (err) {
-        console.error('Failed to load initial data:', err);
+        console.error('Failed to load initial stock context:', err);
       }
     };
+    fetchContext();
+  }, [tradingMode]);
 
-    fetchInitialData();
+  // Periodic In-App Sentinel Keep-Alive ping (every 45s while browser tab is active)
+  useEffect(() => {
+    const keepAlivePing = () => {
+      fetch('/api/heartbeat?source=In-App%20Browser%20Sentinel', { method: 'GET' }).catch(() => {});
+    };
+    keepAlivePing();
+    const interval = setInterval(keepAlivePing, 45000);
+    return () => clearInterval(interval);
   }, []);
-
-  // Fetch market sentiment
-  const fetchMarketSentiment = async () => {
-    try {
-      const res = await fetch('/api/market-sentiment');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.sentiment) setMarketSentiment(data.sentiment);
-      }
-    } catch (e) {
-      console.error('Failed to load market sentiment:', e);
-    }
-  };
-
-  // Fetch transactions from server
-  const fetchTransactions = async () => {
-    try {
-      const res = await fetch('/api/transactions');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.transactions) {
-          setTransactions(data.transactions);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch transactions:', err);
-    }
-  };
-
-  // Dedicated fetch for unified canonical portfolio accounting
-  const fetchAccounting = async () => {
-    try {
-      const res = await fetch('/api/portfolio/accounting');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.accounting) {
-          setAccounting(data.accounting);
-          if (data.accounting.positions) {
-            setPositions(data.accounting.positions);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Failed to fetch accounting:', e);
-    }
-  };
-
-  // Reload memory, positions, and capital
-  const fetchMemoryAndPositions = async () => {
-    try {
-      const memRes = await fetch('/api/memory');
-      if (memRes.ok) {
-        const memData = await memRes.json();
-        if (memData.openPositions) setPositions(memData.openPositions);
-        if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
-        if (memData.accounting) setAccounting(memData.accounting);
-      }
-      const cfgRes = await fetch('/api/config');
-      if (cfgRes.ok) {
-        const cfg = await cfgRes.json();
-        setConfig(cfg);
-      }
-      fetchAccounting();
-    } catch (e) {
-      console.error('Failed to reload positions:', e);
-    }
-  };
-
-  // Run Universe Scanner
-  const handleRunUniverseScan = async (options?: { sector?: string; lowRiskOnly?: boolean }) => {
-    setIsScanning(true);
-    try {
-      const res = await fetch('/api/scanner/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(options || {}),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results) {
-          setScannedStocks(data.results);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to run universe scan:', err);
-    } finally {
-      setIsScanning(false);
-    }
-  };
 
   // When selectedTicker changes, update market context
   const handleSelectTicker = async (ticker: string) => {
     setSelectedTicker(ticker);
     try {
-      const res = await fetch(`/api/market-context/${ticker}`);
+      const res = await fetch(`/api/market-context/${ticker}?mode=${tradingMode}`);
       if (res.ok) {
         const data = await res.json();
         setMarketContext(data);
@@ -242,6 +136,22 @@ export default function App() {
     } catch (err) {
       console.error(`Failed to fetch context for ${ticker}:`, err);
     }
+  };
+
+  // Switch between Long Trading and Intraday Trading
+  const handleTradingModeChange = (newMode: TradingHorizonMode) => {
+    setTradingMode(newMode);
+    const qMode = newMode === 'SWING' ? 'long' : 'intraday';
+    fetchMemoryAndPositions(qMode);
+    fetchTransactions(qMode);
+    fetchTradeHistory(qMode);
+    fetchAccounting(qMode);
+    fetch(`/api/market-context/${selectedTicker}?mode=${newMode}&fresh=true`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setMarketContext(data);
+      })
+      .catch((err) => console.warn('Context mode switch failed:', err));
   };
 
   // Select stock from Scanner or History and jump directly into Pipeline
@@ -264,20 +174,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker }),
       });
-
       if (res.ok) {
         const result: PipelineResult = await res.json();
         setPipelineResult(result);
         if (result.marketContext) {
           setMarketContext(result.marketContext);
         }
-        // Refresh positions, memory & transactions
-        const memRes = await fetch('/api/memory');
-        if (memRes.ok) {
-          const memData = await memRes.json();
-          if (memData.openPositions) setPositions(memData.openPositions);
-          if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
-        }
+        await fetchMemoryAndPositions();
         fetchTransactions();
       }
     } catch (err) {
@@ -287,7 +190,7 @@ export default function App() {
     }
   };
 
-  // Dedicated manual order execution — heartbeat scans no longer place orders automatically
+  // Dedicated manual order execution
   const handlePlaceManualOrder = async (orderParams: {
     ticker: string;
     action: 'BUY' | 'SELL';
@@ -304,30 +207,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderParams),
       });
-
       const data = await res.json();
       if (data.success && data.position) {
         setOrderToast({
           type: 'success',
           message: `Manual ${data.position.action} order executed: ${data.position.shares} shares of ${data.position.ticker} @ ₹${data.position.fill_price}`,
         });
-
-        // Auto-dismiss order toast after 6 seconds
         setTimeout(() => setOrderToast(null), 6000);
 
-        // Refresh open positions
         if (data.openPositions) {
           setPositions(data.openPositions);
         } else {
-          const memRes = await fetch('/api/memory');
-          if (memRes.ok) {
-            const memData = await memRes.json();
-            if (memData.openPositions) setPositions(memData.openPositions);
-          }
+          await fetchMemoryAndPositions();
         }
         fetchTransactions();
 
-        // Update pipelineResult execution step to reflect manual execution fill
         if (pipelineResult && pipelineResult.ticker === orderParams.ticker) {
           setPipelineResult({
             ...pipelineResult,
@@ -382,17 +276,9 @@ export default function App() {
             setMarketContext(result.marketContext);
           }
         }
-        // Small delay between scans
         await new Promise((r) => setTimeout(r, 600));
       }
-
-      // Refresh memory & positions & transactions
-      const memRes = await fetch('/api/memory');
-      if (memRes.ok) {
-        const memData = await memRes.json();
-        if (memData.openPositions) setPositions(memData.openPositions);
-        if (memData.tradeHistory) setTradeHistory(memData.tradeHistory);
-      }
+      await fetchMemoryAndPositions();
       fetchTransactions();
     } catch (err) {
       console.error('Scan all failed:', err);
@@ -401,214 +287,12 @@ export default function App() {
     }
   };
 
-  // Add custom ticker
+  // Add custom ticker to watchlist
   const handleAddTicker = (ticker: string) => {
     if (!watchlist.includes(ticker)) {
       setWatchlist([...watchlist, ticker]);
     }
     handleSelectTicker(ticker);
-  };
-
-  // Add any custom NSE ticker into global universe
-  const handleAddCustomTicker = async (ticker: string, sector?: string) => {
-    try {
-      const res = await fetch('/api/universe/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, sector }),
-      });
-      if (res.ok) {
-        if (!watchlist.includes(ticker)) {
-          setWatchlist((prev) => [ticker, ...prev]);
-        }
-        await handleRunUniverseScan();
-      }
-    } catch (err) {
-      console.error('Failed to add custom ticker to universe:', err);
-    }
-  };
-
-  // Close position and reflect
-  const handleClosePosition = async (orderId: string, exitPrice: number) => {
-    const res = await fetch('/api/positions/close', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderId, exit_price: exitPrice }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.accounting) {
-        setAccounting(data.accounting);
-      }
-      if (data.updatedCapital) {
-        setConfig((prev) => ({
-          ...prev,
-          system: {
-            ...prev.system,
-            currentPaperCapital: data.updatedCapital,
-          },
-        }));
-      }
-
-      // Refresh positions, memory & transactions ledger
-      await fetchMemoryAndPositions();
-      fetchTransactions();
-    }
-  };
-
-  // Reset portfolio
-  const handleResetPortfolio = async () => {
-    const res = await fetch('/api/portfolio/reset', { method: 'POST' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.accounting) setAccounting(data.accounting);
-      setConfig((prev) => ({
-        ...prev,
-        system: {
-          ...prev.system,
-          currentPaperCapital: data.capital,
-        },
-      }));
-      setPositions([]);
-      setTradeHistory([]);
-      fetchTransactions();
-      fetchAutonomousSummary();
-    }
-  };
-
-  // Fetch Autonomous 7-Day Summary
-  const fetchAutonomousSummary = async () => {
-    try {
-      const res = await fetch('/api/autonomous/7day-summary');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.summary) setAutonomousSummary(data.summary);
-        if (data.status) setDaemonStatus(data.status);
-        if (data.accounting) setAccounting(data.accounting);
-      }
-    } catch (e) {
-      console.error('Failed to fetch autonomous 7-day summary:', e);
-    }
-  };
-
-  // Run 7-day autonomous cycle
-  const handleRun7DayCycle = async () => {
-    setIsLoadingAutonomous(true);
-    try {
-      const res = await fetch('/api/autonomous/run-7day', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startingCapital: 50000.0 }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.summary) setAutonomousSummary(data.summary);
-        if (data.openPositions) setPositions(data.openPositions);
-        if (data.tradeHistory) setTradeHistory(data.tradeHistory);
-        if (data.accounting) setAccounting(data.accounting);
-        if (data.systemConfig) setConfig(data.systemConfig);
-        fetchTransactions();
-      }
-    } catch (err) {
-      console.error('Failed to execute 7-day autonomous cycle:', err);
-    } finally {
-      setIsLoadingAutonomous(false);
-    }
-  };
-
-  // Start 7-Day Live Real-Time Campaign (Day 1)
-  const handleStartLiveCampaign = async () => {
-    setIsLoadingAutonomous(true);
-    try {
-      const res = await fetch('/api/autonomous/live-campaign/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startingCapital: 50000.0 }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.accounting) setAccounting(data.accounting);
-        if (data.campaign && daemonStatus) {
-          setDaemonStatus((prev) => prev ? { ...prev, campaign: data.campaign, adaptiveModel: data.adaptiveModel } : null);
-        }
-        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
-      }
-    } catch (err) {
-      console.error('Failed to start live 7-day campaign:', err);
-    } finally {
-      setIsLoadingAutonomous(false);
-    }
-  };
-
-  // Immediate Real-Time Scan & Trade
-  const handleTradeNow = async () => {
-    setIsLoadingAutonomous(true);
-    try {
-      const res = await fetch('/api/autonomous/live-campaign/trade-now', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.accounting) setAccounting(data.accounting);
-        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
-      }
-    } catch (err) {
-      console.error('Failed to execute real-time trade:', err);
-    } finally {
-      setIsLoadingAutonomous(false);
-    }
-  };
-
-  // Full reset to zero state
-  const handleResetToZero = async () => {
-    setIsLoadingAutonomous(true);
-    try {
-      const res = await fetch('/api/portfolio/reset-zero', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startingCapital: 50000.0 }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPositions([]);
-        setTradeHistory([]);
-        setAutonomousSummary(null);
-        if (data.accounting) setAccounting(data.accounting);
-        setConfig((prev) => ({
-          ...prev,
-          system: {
-            ...prev.system,
-            initialPaperCapital: 50000.0,
-            currentPaperCapital: 50000.0,
-          },
-        }));
-        fetchTransactions();
-        fetchAutonomousSummary();
-      }
-    } catch (err) {
-      console.error('Failed to reset to zero:', err);
-    } finally {
-      setIsLoadingAutonomous(false);
-    }
-  };
-
-  // Toggle Autonomous Bot Daemon
-  const handleToggleDaemon = async (enabled?: boolean) => {
-    try {
-      const res = await fetch('/api/autonomous/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status) setDaemonStatus(data.status);
-      }
-    } catch (err) {
-      console.error('Failed to toggle autonomous daemon:', err);
-    }
   };
 
   // Save config
@@ -624,14 +308,42 @@ export default function App() {
     }
   };
 
-  // Periodic background refresh of open positions to keep profit or loss live
-  useEffect(() => {
-    const timer = setInterval(() => {
-      fetchMemoryAndPositions();
-      fetchAutonomousSummary();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, []);
+  // Start 7-Day Live Real-Time Campaign (Day 1)
+  const handleStartLiveCampaign = async () => {
+    try {
+      const res = await fetch('/api/autonomous/live-campaign/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingCapital: 50000.0 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.campaign && daemonStatus) {
+          setDaemonStatus((prev) =>
+            prev ? { ...prev, campaign: data.campaign, adaptiveModel: data.adaptiveModel } : null
+          );
+        }
+        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
+      }
+    } catch (err) {
+      console.error('Failed to start live 7-day campaign:', err);
+    }
+  };
+
+  // Immediate Real-Time Scan & Trade
+  const handleTradeNow = async () => {
+    try {
+      const res = await fetch('/api/autonomous/live-campaign/trade-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        await Promise.all([fetchMemoryAndPositions(), fetchTransactions(), fetchAutonomousSummary()]);
+      }
+    } catch (err) {
+      console.error('Failed to execute real-time trade:', err);
+    }
+  };
 
   // Calculate aggregate live unrealized P&L across active trades
   const totalUnrealizedPnl = positions.reduce((sum, p) => {
@@ -646,7 +358,11 @@ export default function App() {
   const goodOpportunitiesCount = scannedStocks.filter((s) => s.is_good_opportunity).length;
 
   return (
-    <div className="min-h-screen bg-stone-100/60 font-sans text-stone-900 antialiased selection:bg-amber-100 selection:text-amber-900">
+    <div
+      className={`min-h-screen ${
+        theme === 'dark' ? 'dark bg-[#0c0e12] text-stone-100' : 'bg-stone-100/60 text-stone-900'
+      } font-sans antialiased selection:bg-amber-100 dark:selection:bg-amber-900/60 selection:text-amber-900 dark:selection:text-amber-200 transition-colors duration-200`}
+    >
       {/* Navigation Header */}
       <Navbar
         activeTab={activeTab}
@@ -660,26 +376,42 @@ export default function App() {
         totalUnrealizedPnl={totalUnrealizedPnl}
         onOpenAlertSettings={() => setShowAlertSettings(true)}
         alertsCount={alerts.length}
+        onOpenHeartbeat={() => setShowHeartbeatModal(true)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        tradingMode={tradingMode}
+        onTradingModeChange={handleTradingModeChange}
+        onOpenPdfReport={() => setShowPdfReportModal(true)}
+        onOpenAnalyst={() => {
+          setActiveTab('analyst');
+          setAnalystSubTab('matrix');
+        }}
+        onOpenCatchup={() => {
+          setActiveTab('analyst');
+          setAnalystSubTab('catchup');
+        }}
       />
 
       {/* Main Content Area */}
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
-        {/* Universal Persistent Active Trades Live Profit/Loss Bar - Always visible across ALL tabs if open positions exist */}
-        {positions.length > 0 && (
+        {/* Global Active & Ended Trades Section */}
+        {activeTab !== 'portfolio' && activeTab !== 'transactions' && (
           <ActiveTradesLivePnl
             positions={positions}
-            onClosePosition={handleClosePosition}
+            tradeHistory={tradeHistory}
+            onClosePosition={(orderId, exitPrice) => handleClosePosition(orderId, exitPrice)}
             onViewPortfolio={() => setActiveTab('portfolio')}
             onViewTransactions={() => setActiveTab('transactions')}
             onOpenAlertSettings={() => setShowAlertSettings(true)}
-            alertThresholds={{ profitPct: thresholds.profitPct, lossPct: thresholds.lossPct }}
+            alertThresholds={thresholds}
+            defaultExpanded={true}
+            onSelectStrategy={(id) => setInspectingStrategyId(id)}
           />
         )}
 
         {/* TAB 1: Live Pipeline & Radar */}
         {activeTab === 'pipeline' && (
           <div className="space-y-6">
-            {/* Watchlist Radar Bar */}
             <WatchlistRadar
               watchlist={watchlist}
               selectedTicker={selectedTicker}
@@ -691,7 +423,6 @@ export default function App() {
               onOpenScanner={() => setActiveTab('scanner')}
             />
 
-            {/* Quick Market Sentiment Dial Preview Bar */}
             {marketSentiment && (
               <MarketSentimentDial
                 sentiment={marketSentiment}
@@ -700,7 +431,6 @@ export default function App() {
               />
             )}
 
-            {/* Manual Order Execution Feedback Toast */}
             {orderToast && (
               <div
                 id="order-execution-toast"
@@ -720,7 +450,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Selected Stock Horizon Card with Independent Verdict & Manual Order Buttons */}
             {marketContext && (
               <SelectedStockHorizonCard
                 ticker={selectedTicker}
@@ -735,7 +464,6 @@ export default function App() {
               />
             )}
 
-            {/* Technical Sensory Chart */}
             {marketContext && (
               <CandleChart
                 marketContext={marketContext}
@@ -743,7 +471,6 @@ export default function App() {
               />
             )}
 
-            {/* Step-by-Step Pipeline Visualizer with Autonomous Decision & Manual Execution */}
             <PipelineVisualizer
               pipelineResult={pipelineResult}
               isRunning={isRunning}
@@ -754,7 +481,39 @@ export default function App() {
           </div>
         )}
 
-        {/* User Requested TAB: My Stocks Zerodha Statement & AI BOT ADVANCE Audit */}
+        {/* TAB: Autonomous Algo Research Bot & Sandbox Lab */}
+        {activeTab === 'algo_research' && (
+          <AlgoResearchBot
+            tradingMode={tradingMode}
+            onStrategyApproved={(strategy) => {
+              setOrderToast({
+                type: 'success',
+                message: `Strategy '${strategy.name}' successfully deployed to paper forward-testing under safety limits.`,
+              });
+            }}
+            onNavigateToPortfolio={() => setActiveTab('portfolio')}
+          />
+        )}
+
+        {/* TAB: Hall of Titans: Master Strategies */}
+        {activeTab === 'titans' && (
+          <TitansView
+            onSelectTickerForPipeline={handleSelectStockForPipeline}
+          />
+        )}
+
+        {/* TAB: Analyst Learning Agent (Goal: To Be The Best Trader in the World) */}
+        {activeTab === 'analyst' && (
+          <AnalystHub
+            tradingMode={tradingMode}
+            onTradingModeChange={handleTradingModeChange}
+            onNavigateToTab={(t) => setActiveTab(t as TabType)}
+            onSelectStrategy={(id) => setInspectingStrategyId(id)}
+            initialSubTab={analystSubTab}
+          />
+        )}
+
+        {/* TAB: My Stocks Zerodha Statement & AI BOT ADVANCE Audit */}
         {activeTab === 'my_stocks' && (
           <MyStocksView
             onExecuteManualTrade={(ticker, action, shares) => {
@@ -767,7 +526,7 @@ export default function App() {
           />
         )}
 
-        {/* User Requested TAB: Decision Reasoning & Trade Loss Prevention */}
+        {/* TAB: Decision Reasoning & Trade Loss Prevention */}
         {activeTab === 'decision_reasoning' && (
           <DecisionReasoningView
             selectedTicker={selectedTicker}
@@ -779,7 +538,7 @@ export default function App() {
           />
         )}
 
-        {/* TAB: Best Returns by Risk Tier (Low Risk, Medium Risk, High Risk) */}
+        {/* TAB: Best Returns by Risk Tier */}
         {activeTab === 'risk_tiers' && (
           <RiskTiersDashboard
             scannedStocks={scannedStocks}
@@ -790,7 +549,7 @@ export default function App() {
           />
         )}
 
-        {/* TAB 2: Full Stock Scanner (Good Return Margin & Low Risk) */}
+        {/* TAB: Full Stock Scanner */}
         {activeTab === 'scanner' && (
           <StockScanner
             scannedStocks={scannedStocks}
@@ -812,7 +571,7 @@ export default function App() {
           />
         )}
 
-        {/* User Requested TAB: News Based Recommendations */}
+        {/* TAB: News Based Recommendations */}
         {activeTab === 'news_recommendations' && (
           <NewsBasedRecommendations
             systemConfig={config}
@@ -827,7 +586,7 @@ export default function App() {
           />
         )}
 
-        {/* TAB 3: Dedicated Transaction History Audit Ledger */}
+        {/* TAB: Dedicated Transaction History Audit Ledger */}
         {activeTab === 'transactions' && (
           <TransactionHistory
             transactions={transactions}
@@ -835,10 +594,14 @@ export default function App() {
             onRefresh={fetchTransactions}
             onSelectTickerForPipeline={handleSelectStockForPipeline}
             onClosePosition={handleClosePosition}
+            onOpenPdfReport={() => setShowPdfReportModal(true)}
+            tradingMode={tradingMode}
+            onTradingModeChange={handleTradingModeChange}
+            onSelectStrategy={(id) => setInspectingStrategyId(id)}
           />
         )}
 
-        {/* TAB 4: Paper Portfolio & Episodic Memory */}
+        {/* TAB: Paper Portfolio & Episodic Memory */}
         {activeTab === 'portfolio' && (
           <PortfolioPanel
             config={config}
@@ -846,8 +609,8 @@ export default function App() {
             tradeHistory={tradeHistory}
             onClosePosition={handleClosePosition}
             onResetPortfolio={handleResetPortfolio}
-            onResetToZero={handleResetToZero}
-            onRun7DayCycle={handleRun7DayCycle}
+            onResetToZero={() => handleResetZero()}
+            onRun7DayCycle={() => handleRunAutonomous7Day()}
             onStartLiveCampaign={handleStartLiveCampaign}
             onTradeNow={handleTradeNow}
             onToggleDaemon={handleToggleDaemon}
@@ -856,32 +619,52 @@ export default function App() {
             onOpenAlertSettings={() => setShowAlertSettings(true)}
             isLoadingAutonomous={isLoadingAutonomous}
             accounting={accounting}
+            onOpenPdfReport={() => setShowPdfReportModal(true)}
+            tradingMode={tradingMode}
+            onTradingModeChange={handleTradingModeChange}
+            strategyMetrics={strategyMetrics}
+            onSelectStrategy={(id) => setInspectingStrategyId(id)}
+            onOpenCatchup={() => {
+              setActiveTab('analyst');
+              setAnalystSubTab('catchup');
+            }}
           />
         )}
 
-        {/* TAB 5: Risk Governor Math Lab */}
+        {/* TAB: Risk Governor Math Lab */}
         {activeTab === 'risk_math' && <RiskSimulator />}
 
-        {/* TAB 6: Architecture & Python Code */}
+        {/* TAB: Architecture & Python Code */}
         {activeTab === 'architecture' && <ArchitectureViewer />}
 
-        {/* TAB 7: config.toml Settings */}
+        {/* TAB: config.toml Settings */}
         {activeTab === 'settings' && (
-          <ConfigView config={config} onSaveConfig={handleSaveConfig} />
+          <ConfigView
+            config={config}
+            onSaveConfig={handleSaveConfig}
+            onOpenHeartbeat={() => setShowHeartbeatModal(true)}
+            onOpenPdfReport={() => setShowPdfReportModal(true)}
+          />
         )}
       </main>
 
       {/* Footer Info */}
-      <footer className="mt-12 border-t border-stone-200 bg-white py-6 text-center text-xs text-stone-500">
+      <footer className="mt-12 border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-[#11131a] py-6 text-center text-xs text-stone-500 dark:text-stone-400 transition-colors">
         <div className="mx-auto max-w-7xl px-4">
-          <p className="font-medium text-stone-700">
+          <p className="font-medium text-stone-700 dark:text-stone-200">
             AI BOT ADVANCE &bull; Quantitative Reasoning Engine
           </p>
-          <p className="mt-1 text-[11px] text-stone-400">
-            Decoupled Architecture: 40-Stock Universe Sensory Ingestion &bull; Full Transaction Audit History &bull; SQLite Episodic Memory &bull; Gemini 3-Agent Debate &bull; Deterministic Mathematical Sizing &bull; Paper / Zerodha Kite Gateway
+          <p className="mt-1 text-[11px] text-stone-400 dark:text-stone-500">
+            Decoupled SOLID Architecture &bull; 40-Stock Universe Sensory Ingestion &bull; Full Transaction Audit History &bull; SQLite Episodic Memory &bull; Gemini 3-Agent Debate &bull; Deterministic Mathematical Sizing &bull; Paper / Zerodha Kite Gateway &bull; 24/7 Keep-Alive Sentinel
           </p>
         </div>
       </footer>
+
+      {/* 24/7 Heartbeat Sentinel & Free Keep-Alive Modal */}
+      <HeartbeatSentinelModal
+        isOpen={showHeartbeatModal}
+        onClose={() => setShowHeartbeatModal(false)}
+      />
 
       {/* Toast Notification Center for Live PnL Alerts */}
       <ToastNotificationCenter
@@ -892,12 +675,33 @@ export default function App() {
         onDismiss={dismissAlert}
         onClearAll={clearAllAlerts}
         onUpdateThresholds={updateThresholds}
-        onSelectPosition={(orderId) => {
+        onSelectPosition={() => {
           setActiveTab('portfolio');
         }}
         onTriggerTestAlert={triggerTestAlert}
       />
+
+      {/* Official Trades & Portfolio PDF Audit Report Modal */}
+      <TradesPdfReportModal
+        isOpen={showPdfReportModal}
+        onClose={() => setShowPdfReportModal(false)}
+        openPositions={positions}
+        tradeHistory={tradeHistory}
+        transactions={transactions}
+        accounting={accounting}
+        onOpenScheduleSettings={() => setActiveTab('settings')}
+      />
+
+      {/* Strategy Inspector Modal (Itemized Trades & Real Returns) */}
+      <StrategyInspectorModal
+        strategyId={inspectingStrategyId}
+        onClose={() => setInspectingStrategyId(null)}
+        onOpenStressTester={(stratId) => {
+          setInspectingStrategyId(null);
+          setActiveTab('analyst');
+          setAnalystSubTab('stress_test');
+        }}
+      />
     </div>
   );
 }
-

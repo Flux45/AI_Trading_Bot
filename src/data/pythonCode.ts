@@ -151,7 +151,7 @@ def debate_and_synthesize(market_context: dict, past_lessons: list = None) -> Tr
         config = tomllib.load(f)
 
     os.environ["GEMINI_API_KEY"] = config["credentials"]["GEMINI_API_KEY"]
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.1)
+    llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0.1)
 
     system_prompt = """
     You are an automated Quantitative Risk Committee trading Indian equities (NSE).

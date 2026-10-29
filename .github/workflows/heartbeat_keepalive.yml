@@ -1,0 +1,25 @@
+name: 24/7 Keep-Alive Heartbeat
+
+on:
+  schedule:
+    # Run every 5 minutes (standard POSIX cron: minute hour day-of-month month day-of-week)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  heartbeat:
+    name: Ping Quant Trading Engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Heartbeat Ping to Cloud Run
+        run: |
+          TARGET_URL="https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/heartbeat"
+          echo "Sending 24/7 Keep-Alive Heartbeat Ping to $TARGET_URL..."
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -A "GitHubActions-QuantHeartbeat/1.0" "$TARGET_URL")
+          echo "Response HTTP Status: $HTTP_STATUS"
+          cat response.json
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Warning: Heartbeat returned non-200 code ($HTTP_STATUS)"
+            exit 1
+          fi
+          echo "Heartbeat successfully acknowledged. Container kept warm."

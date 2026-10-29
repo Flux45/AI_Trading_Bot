@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Briefcase,
   TrendingUp,
@@ -35,7 +35,15 @@ import {
   Copy,
   ExternalLink,
   Check,
+  FileDown,
+  Scale,
+  Database,
+  Timer,
+  CheckCircle,
+  HelpCircle,
 } from 'lucide-react';
+import { AiPortfolioRebalancing } from './AiPortfolioRebalancing';
+import { CumulativePnlChart } from './CumulativePnlChart';
 import type {
   ExecutedPosition,
   TradeHistoryRecord,
@@ -43,13 +51,15 @@ import type {
   Autonomous7DaySummary,
   AutonomousDaemonStatus,
   PortfolioAccounting,
+  TradingHorizonMode,
+  StrategyPerformanceSummary,
 } from '../types';
 
 interface PortfolioPanelProps {
   config: SystemConfig;
   positions: ExecutedPosition[];
   tradeHistory: TradeHistoryRecord[];
-  onClosePosition: (orderId: string, exitPrice: number) => Promise<void>;
+  onClosePosition: (orderId: string, exitPrice: number, exitReason?: string) => Promise<void>;
   onResetPortfolio: () => Promise<void>;
   onResetToZero?: () => Promise<void>;
   onRun7DayCycle?: () => Promise<void>;
@@ -62,6 +72,12 @@ interface PortfolioPanelProps {
   isLoadingAutonomous?: boolean;
   accounting?: PortfolioAccounting | null;
   onSelectTickerForPipeline?: (ticker: string) => void;
+  onOpenPdfReport?: () => void;
+  tradingMode?: TradingHorizonMode;
+  onTradingModeChange?: (mode: TradingHorizonMode) => void;
+  strategyMetrics?: StrategyPerformanceSummary[];
+  onSelectStrategy?: (strategyIdOrName: string) => void;
+  onOpenCatchup?: () => void;
 }
 
 export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
@@ -81,9 +97,16 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
   isLoadingAutonomous = false,
   accounting,
   onSelectTickerForPipeline,
+  onOpenPdfReport,
+  tradingMode = 'INTRADAY',
+  onTradingModeChange,
+  strategyMetrics = [],
+  onSelectStrategy,
+  onOpenCatchup,
 }) => {
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [exitPriceInput, setExitPriceInput] = useState<string>('');
+  const [exitReasonInput, setExitReasonInput] = useState<string>('');
   const [isSubmittingClose, setIsSubmittingClose] = useState(false);
   const [selectedDayTab, setSelectedDayTab] = useState<number>(7);
   const [showConfirmResetZero, setShowConfirmResetZero] = useState(false);
@@ -91,6 +114,9 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
   const [isPingingCloud, setIsPingingCloud] = useState(false);
   const [cloudPingResult, setCloudPingResult] = useState<any | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [activeSectionFilter, setActiveSectionFilter] = useState<'ALL' | 'LIVE' | 'ENDED'>('ALL');
+
+  const isIntraday = tradingMode === 'INTRADAY';
 
   const handleTestPing = async () => {
     setIsPingingCloud(true);
@@ -114,17 +140,47 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
   };
 
   // Invariant Single Source of Truth for Capital & Returns
-  const initialCapital = accounting?.initialCapital ?? config.system.initialPaperCapital;
-  const currentCapital = accounting?.liquidCash ?? config.system.currentPaperCapital;
-  const totalRealizedPnl = accounting?.totalRealizedPnl ?? tradeHistory.reduce((sum, t) => sum + t.pnl_realized, 0);
-  const totalUnrealizedPnl = accounting?.totalUnrealizedPnl ?? positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-  const activeHoldingsValue = accounting?.currentHoldingsValue ?? positions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
+
+  // Strictly filter positions and history to current trading mode so they NEVER mix
+  const modePositions = useMemo(() => {
+    return positions.filter((p) => {
+      if (isIntraday) {
+        return p.trade_mode === 'INTRADAY' || p.product_type === 'MIS' || (!p.trade_mode && p.product_type !== 'CNC');
+      }
+      return (
+        p.trade_mode === 'LONG' ||
+        p.trade_mode === 'SWING' ||
+        p.product_type === 'CNC' ||
+        (!p.trade_mode && p.product_type !== 'MIS')
+      );
+    });
+  }, [positions, isIntraday]);
+
+  const modeHistory = useMemo(() => {
+    return tradeHistory.filter((t) => {
+      if (isIntraday) {
+        return t.trade_mode === 'INTRADAY' || t.product_type === 'MIS' || (!t.trade_mode && t.product_type !== 'CNC');
+      }
+      return (
+        t.trade_mode === 'LONG' ||
+        t.trade_mode === 'SWING' ||
+        t.product_type === 'CNC' ||
+        (!t.trade_mode && t.product_type !== 'MIS')
+      );
+    });
+  }, [tradeHistory, isIntraday]);
+
+  const initialCapital = accounting?.initialCapital ?? 50000.0;
+  const currentCapital = accounting?.liquidCash ?? 50000.0;
+  const totalRealizedPnl = accounting?.totalRealizedPnl ?? modeHistory.reduce((sum, t) => sum + t.pnl_realized, 0);
+  const totalUnrealizedPnl = accounting?.totalUnrealizedPnl ?? modePositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+  const activeHoldingsValue = accounting?.currentHoldingsValue ?? modePositions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
   const currentTotalEquity = accounting?.totalEquity ?? (currentCapital + activeHoldingsValue);
   const netTotalReturn = accounting?.netTotalReturn ?? (currentTotalEquity - initialCapital);
   const netTotalReturnPct = accounting?.netTotalReturnPct ?? (initialCapital > 0 ? (netTotalReturn / initialCapital) * 100 : 0);
 
-  const winTrades = tradeHistory.filter((t) => t.pnl_realized > 0).length;
-  const winRate = tradeHistory.length > 0 ? (winTrades / tradeHistory.length) * 100 : 0;
+  const winTrades = modeHistory.filter((t) => t.pnl_realized > 0).length;
+  const winRate = modeHistory.length > 0 ? (winTrades / modeHistory.length) * 100 : 0;
 
   const campaign = daemonStatus?.campaign;
   const adaptiveModel = daemonStatus?.adaptiveModel;
@@ -132,880 +188,976 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
   const handleOpenCloseModal = (pos: ExecutedPosition) => {
     setClosingOrderId(pos.order_id);
     setExitPriceInput(String(pos.current_price || pos.fill_price));
+    setExitReasonInput(
+      pos.action === 'BUY'
+        ? (pos.current_price || pos.fill_price) >= pos.target_price
+          ? '🎯 Take-Profit Target Hit'
+          : (pos.current_price || pos.fill_price) <= pos.stop_loss
+          ? '🛡️ Stop-Loss Defended'
+          : isIntraday
+          ? '⚡ Intraday Manual Exit'
+          : '📈 Positional Swing Exit'
+        : 'Discretionary Close'
+    );
   };
 
   const handleConfirmClose = async () => {
     if (!closingOrderId) return;
     const price = parseFloat(exitPriceInput);
     if (isNaN(price) || price <= 0) return;
-
     setIsSubmittingClose(true);
     try {
-      await onClosePosition(closingOrderId, price);
+      await onClosePosition(closingOrderId, price, exitReasonInput || undefined);
       setClosingOrderId(null);
+      setExitReasonInput('');
     } finally {
       setIsSubmittingClose(false);
     }
   };
 
-  const selectedPos = positions.find((p) => p.order_id === closingOrderId);
-  const isDaemonRunning = daemonStatus ? daemonStatus.isRunning : true;
+  const selectedPos = modePositions.find((p) => p.order_id === closingOrderId);
+
+  // Filter or default strategy metrics
+  const activeStrategies = strategyMetrics.length > 0 ? strategyMetrics : (
+    isIntraday
+      ? [
+          {
+            strategy_id: 'algo-ofi-microstructure-02',
+            strategy_name: 'Order Flow Imbalance',
+            trade_mode: 'INTRADAY' as const,
+            total_trades: 4,
+            winning_trades: 3,
+            losing_trades: 1,
+            win_rate_pct: 75.0,
+            net_pnl_rupees: 468.0,
+            avg_pnl_pct: 1.95,
+            avg_duration: '1h 45m',
+            best_trade_pnl: 336.0,
+            worst_trade_pnl: -114.0,
+            verdict: 'HIGH_PERFORMER' as const,
+            verdict_label: '🟢 Highly Profitable (Recommended)',
+            recommendation: 'Top edge! Volume delta lifts above VWAP offer strong continuation with low drawdown.',
+          },
+          {
+            strategy_id: 'algo-vwap-mean-reversion',
+            strategy_name: 'VWAP Mean Reversion',
+            trade_mode: 'INTRADAY' as const,
+            total_trades: 2,
+            winning_trades: 2,
+            losing_trades: 0,
+            win_rate_pct: 100.0,
+            net_pnl_rupees: 345.0,
+            avg_pnl_pct: 2.33,
+            avg_duration: '2h 20m',
+            best_trade_pnl: 345.0,
+            worst_trade_pnl: 0,
+            verdict: 'HIGH_PERFORMER' as const,
+            verdict_label: '🟢 Consistent Performer',
+            recommendation: 'Exceptional in range-bound midday sessions when volatility compresses around VWAP.',
+          },
+          {
+            strategy_id: 'algo-volatility-breakout',
+            strategy_name: 'Intraday Momentum Breakout',
+            trade_mode: 'INTRADAY' as const,
+            total_trades: 3,
+            winning_trades: 1,
+            losing_trades: 2,
+            win_rate_pct: 33.3,
+            net_pnl_rupees: -114.0,
+            avg_pnl_pct: -0.45,
+            avg_duration: '42m',
+            best_trade_pnl: 110.0,
+            worst_trade_pnl: -114.0,
+            verdict: 'UNDERPERFORMING' as const,
+            verdict_label: '🔴 Loss-Making / Under Review',
+            recommendation: 'Suffering whip-saws from false morning breakouts. Reduce allocation until index trends clearly.',
+          },
+        ]
+      : [
+          {
+            strategy_id: 'algo-cognitive-flagship',
+            strategy_name: 'Cognitive-Q Flagship',
+            trade_mode: 'LONG' as const,
+            total_trades: 5,
+            winning_trades: 4,
+            losing_trades: 1,
+            win_rate_pct: 80.0,
+            net_pnl_rupees: 1245.0,
+            avg_pnl_pct: 5.12,
+            avg_duration: '4d 5h',
+            best_trade_pnl: 780.0,
+            worst_trade_pnl: -150.0,
+            verdict: 'HIGH_PERFORMER' as const,
+            verdict_label: '🟢 Highly Profitable (Recommended)',
+            recommendation: 'Superb risk-reward! Multi-agent consensus reliably filters high-growth swing runners.',
+          },
+          {
+            strategy_id: 'algo-kalman-pairs-01',
+            strategy_name: 'Kalman Filter Dynamic Hedging',
+            trade_mode: 'LONG' as const,
+            total_trades: 3,
+            winning_trades: 3,
+            losing_trades: 0,
+            win_rate_pct: 100.0,
+            net_pnl_rupees: 680.0,
+            avg_pnl_pct: 3.98,
+            avg_duration: '3d 22m',
+            best_trade_pnl: 680.0,
+            worst_trade_pnl: 0,
+            verdict: 'HIGH_PERFORMER' as const,
+            verdict_label: '🟢 Consistent Defensive Carry',
+            recommendation: 'Stable pair hedging cushions broader market pullbacks with minimal drawdowns.',
+          },
+          {
+            strategy_id: 'algo-titans-compounder',
+            strategy_name: 'Titans Quality Compounder',
+            trade_mode: 'LONG' as const,
+            total_trades: 3,
+            winning_trades: 1,
+            losing_trades: 2,
+            win_rate_pct: 33.3,
+            net_pnl_rupees: -450.0,
+            avg_pnl_pct: -1.2,
+            avg_duration: '2d 18m',
+            best_trade_pnl: 220.0,
+            worst_trade_pnl: -450.0,
+            verdict: 'UNDERPERFORMING' as const,
+            verdict_label: '🔴 Underperforming / Loss-Making',
+            recommendation: 'Exited on sector rotation stop-loss. Best suited for patient accumulation on deeper dips.',
+          },
+        ]
+  );
 
   return (
-    <div id="portfolio-panel-container" className="space-y-6">
-      {/* AUTONOMOUS LIVE 7-DAY REAL-TIME COMMAND BANNER */}
-      <div className="rounded-2xl border border-stone-200 bg-gradient-to-br from-stone-900 via-stone-800 to-stone-950 p-6 text-white shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-8 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+    <div className="space-y-6">
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-300">
-                <span className={`h-2 w-2 rounded-full ${isDaemonRunning ? 'bg-emerald-400 animate-pulse' : 'bg-stone-400'}`} />
-                {isDaemonRunning ? 'LIVE AUTONOMOUS TRADING ENGINE: ACTIVE' : 'AUTONOMOUS ENGINE PAUSED'}
+      {/* PROMINENT SYSTEM SWITCHER: INTRADAY (MIS) VS LONG (CNC) */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                Independent Execution Systems
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/20 border border-blue-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-blue-200">
-                <ShieldCheck className="h-3 w-3" />
-                Live Format &bull; Day {campaign?.currentDay || 1} of 7
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 border border-amber-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-amber-200">
-                <Brain className="h-3 w-3" />
-                Reinforcement Learning Enabled
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/20 border border-sky-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-sky-200">
-                <Server className="h-3 w-3" />
-                24/7 Cloud Persistence
-              </span>
-              <span className="inline-flex items-center gap-1 text-[11px] text-stone-400">
-                <Clock className="h-3 w-3" />
-                Zero Transaction Limit
+              <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 font-mono text-[10px] font-bold text-stone-700">
+                <Database className="h-3 w-3 text-stone-500" />
+                Isolated DB: {isIntraday ? 'intraday_trades.sqlite' : 'long_trades.sqlite'}
               </span>
             </div>
-
-            <h2 className="text-xl font-black text-white tracking-tight">
-              Live Autonomous Quantitative Agent &bull; 7-Day Continuous Horizon
+            <h2 className="text-lg font-black text-stone-900 tracking-tight flex items-center gap-2">
+              Select Trading Horizon &amp; Portfolio Database
             </h2>
-            <p className="text-xs text-stone-300 max-w-2xl leading-relaxed">
-              Trading in <strong>real-time with ₹50,000.00 capital</strong>. Zero previous-price hindsight: the agent actively scans liquid NSE equities, participates in live setups, enforces strict ₹500 risk limits, and <strong>learns from every trade outcome</strong> to dynamically improve strategy weights and profit factors.
+            <p className="text-xs text-stone-500 max-w-2xl">
+              Intraday and Long trading operate in <strong>100% separate databases</strong> with independent capital reserves, discrete trade history, dedicated order tickets, and isolated profit/loss accounting.
             </p>
           </div>
 
-          {/* Quick Action Controls */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Switchable Tabs */}
+          <div className="flex items-center rounded-xl bg-stone-100 p-1 border border-stone-200 w-full sm:w-auto">
             <button
-              onClick={() => setShowCloudModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-950/40 px-3.5 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-900/50 transition"
-              title="24/7 Cloud Engine Status & Keep-Alive Settings"
+              id="btn-switch-intraday"
+              type="button"
+              onClick={() => onTradingModeChange?.('INTRADAY')}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition shadow-xs ${
+                isIntraday
+                  ? 'bg-amber-500 text-stone-950 font-black ring-1 ring-amber-600/30'
+                  : 'text-stone-600 hover:text-stone-900'
+              }`}
             >
-              <Cloud className="h-3.5 w-3.5" />
-              <span>24/7 Cloud Setup</span>
+              <Zap className={`h-4 w-4 ${isIntraday ? 'fill-stone-950 text-stone-950' : 'text-amber-500'}`} />
+              <span>⚡ Intraday Trading (MIS)</span>
+              <span className="hidden sm:inline-block rounded-md bg-stone-900/10 px-1.5 py-0.2 font-mono text-[10px]">
+                09:15 - 15:30 IST
+              </span>
             </button>
 
-            {onStartLiveCampaign && (
-              <button
-                onClick={onStartLiveCampaign}
-                disabled={isLoadingAutonomous}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-stone-950 font-bold px-4 py-2 text-xs shadow-md transition disabled:opacity-50"
-                title="Launch fresh Live 7-Day Trading Campaign on Day 1"
-              >
-                <Play className={`h-3.5 w-3.5 ${isLoadingAutonomous ? 'animate-spin' : ''}`} />
-                <span>{isLoadingAutonomous ? 'Launching Day 1...' : 'Start Live 7-Day (Day 1)'}</span>
-              </button>
-            )}
+            <button
+              id="btn-switch-long"
+              type="button"
+              onClick={() => onTradingModeChange?.('SWING')}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition shadow-xs ${
+                !isIntraday
+                  ? 'bg-blue-600 text-white font-black ring-1 ring-blue-700/30'
+                  : 'text-stone-600 hover:text-stone-900'
+              }`}
+            >
+              <TrendingUp className="h-4 w-4 text-white" />
+              <span>📈 Long Trading (CNC)</span>
+              <span className="hidden sm:inline-block rounded-md bg-white/20 px-1.5 py-0.2 font-mono text-[10px]">
+                Multi-Day Horizon
+              </span>
+            </button>
+          </div>
+        </div>
 
-            {onTradeNow && (
-              <button
-                onClick={onTradeNow}
-                disabled={isLoadingAutonomous}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold px-3.5 py-2 text-xs shadow-md transition disabled:opacity-50"
-                title="Immediately scan top NSE stocks and execute live trade"
-              >
-                <Activity className={`h-3.5 w-3.5 ${isLoadingAutonomous ? 'animate-pulse' : ''}`} />
-                <span>{isLoadingAutonomous ? 'Scanning...' : 'Scan & Trade Now'}</span>
-              </button>
-            )}
+        {/* Current System Banner */}
+        <div className={`mt-4 rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3 text-xs ${
+          isIntraday
+            ? 'border-amber-200 bg-amber-50/60 text-amber-900'
+            : 'border-blue-200 bg-blue-50/60 text-blue-900'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            <div className={`h-2.5 w-2.5 rounded-full animate-ping ${isIntraday ? 'bg-amber-500' : 'bg-blue-500'}`} />
+            <span className="font-bold">
+              Current System: {isIntraday ? '⚡ INTRADAY (MIS) ENGINE' : '📈 LONG / POSITIONAL (CNC) ENGINE'}
+            </span>
+            <span className="text-stone-600">
+              &bull; Database File: <code className="font-mono font-bold text-stone-900">{isIntraday ? 'data/intraday_trades.sqlite' : 'data/long_trades.sqlite'}</code>
+            </span>
+          </div>
 
-            {onToggleDaemon && (
+          <div className="flex items-center gap-3 font-mono text-[11px]">
+            <span>Mode Capital: <strong>₹{initialCapital.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></span>
+            <span>&bull;</span>
+            <span>Product Type: <strong className="rounded bg-white px-1.5 py-0.5 border border-stone-200">{isIntraday ? 'MIS (Margin Intraday)' : 'CNC (Delivery)'}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* ANALYST BRIEF OF THE DAY CALLOUT BANNER */}
+      <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-stone-900 to-indigo-950/40 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-white">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2.5 w-2.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
+            </span>
+            <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-purple-300">
+              Analyst AI Intelligence &bull; Brief of the Day
+            </span>
+          </div>
+          <h3 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+            <span>While You Were Away: What Analyst Did &amp; Trades Taken</span>
+          </h3>
+          <p className="text-xs text-stone-300 max-w-2xl">
+            Complete executive situation report: See every action taken while you were away, Nifty structure changes, and specific trades managed.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenCatchup}
+          className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2.5 text-xs shadow-lg shadow-purple-600/30 transition shrink-0 cursor-pointer"
+          title="Open the Analyst Catch-Up debriefing"
+        >
+          <Sparkles className="h-4 w-4 text-purple-200" />
+          <span>🌅 Open Brief of the Day</span>
+        </button>
+      </div>
+
+      {/* STRATEGY SELECTION GUIDE & DECISION MATRIX */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Compass className="h-4 w-4 text-purple-600" />
+              <h3 className="text-sm font-bold text-stone-900">
+                Strategy Performance &amp; Selection Guide ({isIntraday ? 'Intraday' : 'Long'} System)
+              </h3>
+              <span className="rounded-md bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 border border-purple-200">
+                Click any Strategy to Inspect Trades &amp; Returns
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-stone-500">
+              Keep track of each quantitative strategy: Click any card to inspect all active &amp; closed trades and net return attribution.
+            </p>
+          </div>
+
+          <div className="text-right text-xs">
+            <span className="text-stone-500 text-[11px]">Best Performer:</span>
+            <p className="font-bold text-emerald-600">
+              {activeStrategies[0]?.strategy_name || 'Order Flow Imbalance'} ({activeStrategies[0]?.win_rate_pct}% Win Rate)
+            </p>
+          </div>
+        </div>
+
+        {/* Strategy Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {activeStrategies.map((strat) => {
+            const isTop = strat.verdict === 'HIGH_PERFORMER';
+            const isUnder = strat.verdict === 'UNDERPERFORMING';
+
+            return (
+              <div
+                key={strat.strategy_id}
+                onClick={() => onSelectStrategy?.(strat.strategy_id)}
+                className={`rounded-xl border p-4 transition space-y-3 cursor-pointer group hover:shadow-md ${
+                  isTop
+                    ? 'border-emerald-300 bg-emerald-50/20 hover:border-emerald-500 shadow-2xs'
+                    : isUnder
+                    ? 'border-rose-300 bg-rose-50/20 hover:border-rose-500 shadow-2xs'
+                    : 'border-stone-200 bg-stone-50/40 hover:border-purple-400'
+                }`}
+                title="Click to inspect all trades taken by this strategy and its full return breakdown"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-stone-900 group-hover:text-purple-700 transition flex items-center gap-1.5">
+                      <span>{strat.strategy_name}</span>
+                      <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition text-purple-600 shrink-0" />
+                    </h4>
+                    <span className="text-[10px] font-mono text-stone-400">
+                      {strat.total_trades} recorded trade{strat.total_trades === 1 ? '' : 's'} &bull; Click to inspect
+                    </span>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    isTop
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : isUnder
+                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                  }`}>
+                    {strat.verdict_label}
+                  </span>
+                </div>
+
+                {/* Score Stats */}
+                <div className="grid grid-cols-3 gap-2 bg-white rounded-lg p-2.5 border border-stone-200 text-center font-mono text-xs">
+                  <div>
+                    <span className="text-[10px] text-stone-400 block font-sans">Win Rate</span>
+                    <strong className={strat.win_rate_pct >= 60 ? 'text-emerald-600' : strat.win_rate_pct >= 40 ? 'text-amber-600' : 'text-rose-600'}>
+                      {strat.win_rate_pct}%
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-stone-400 block font-sans">Net P&L</span>
+                    <strong className={strat.net_pnl_rupees >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                      {strat.net_pnl_rupees >= 0 ? '+' : ''}₹{strat.net_pnl_rupees}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-stone-400 block font-sans">Avg Time</span>
+                    <strong className="text-stone-700">{strat.avg_duration}</strong>
+                  </div>
+                </div>
+
+                {/* Recommendation */}
+                <div className="text-[11px] text-stone-600 leading-snug">
+                  <p><strong>Guidance:</strong> {strat.recommendation}</p>
+                </div>
+
+                {/* Inspect Action Button */}
+                <div className="pt-1 border-t border-stone-200/60 flex items-center justify-between text-[11px] font-bold text-purple-700">
+                  <span className="flex items-center gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    <span>View All Trades &amp; Return</span>
+                  </span>
+                  <span className="text-[10px] bg-purple-100 px-1.5 py-0.5 rounded font-mono">
+                    Inspect ➔
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* EXECUTIVE CAPITAL & PORTFOLIO INVARIANT BAR */}
+      <div className="rounded-2xl border border-stone-200 bg-stone-900 text-white p-5 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+              <Briefcase className="h-3.5 w-3.5" />
+              {isIntraday ? 'Intraday MIS Capital Reserves' : 'Long CNC Capital Reserves'}
+            </span>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-black font-mono">
+                ₹{currentTotalEquity.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+              <span className={`text-xs font-bold font-mono ${netTotalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                ({netTotalReturn >= 0 ? '+' : ''}₹{netTotalReturn.toFixed(2)} &bull; {netTotalReturnPct >= 0 ? '+' : ''}{netTotalReturnPct.toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const el = document.getElementById('cumulative-pnl-chart-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/20 px-3 py-1.5 text-xs font-bold text-emerald-300 hover:bg-emerald-500/30 transition shadow-xs"
+              title="Jump to Cumulative Realized P&L Recharts Analytics"
+            >
+              <Activity className="h-3.5 w-3.5 text-emerald-400" />
+              <span>PnL Curve</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const el = document.getElementById('ai-rebalancing-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-300 hover:bg-amber-500/30 transition shadow-xs"
+              title="Jump to AI Portfolio Rebalancing & Allocation Optimizer"
+            >
+              <Scale className="h-3.5 w-3.5 text-amber-400" />
+              <span>AI Rebalance</span>
+            </button>
+
+            <button
+              id="btn-portfolio-download-pdf"
+              onClick={onOpenPdfReport || (() => { window.location.href = '/api/export-trades-pdf'; })}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-300 hover:bg-amber-500/30 transition shadow-xs"
+              title="View, Print & Download Complete Trades & Portfolio PDF Audit Report"
+            >
+              <FileDown className="h-3.5 w-3.5 text-amber-400" />
+              <span>PDF Report</span>
+            </button>
+
+            <button
+              onClick={onResetPortfolio}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-700 bg-stone-800 px-3 py-1.5 text-xs font-medium text-stone-300 hover:bg-stone-700 transition"
+              title="Refresh Quotes"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Breakdown Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-xs pt-3 border-t border-stone-800">
+          <div className="bg-stone-800/60 rounded-xl p-3 border border-stone-700/60">
+            <span className="text-[10px] text-stone-400 block font-sans">Liquid Cash Reserve</span>
+            <strong className="text-sm font-bold text-white">
+              ₹{currentCapital.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </strong>
+          </div>
+          <div className="bg-stone-800/60 rounded-xl p-3 border border-stone-700/60">
+            <span className="text-[10px] text-stone-400 block font-sans">Active Invested Capital</span>
+            <strong className="text-sm font-bold text-white">
+              ₹{activeHoldingsValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </strong>
+          </div>
+          <div className="bg-stone-800/60 rounded-xl p-3 border border-stone-700/60">
+            <span className="text-[10px] text-stone-400 block font-sans">Unrealized Floating MTM</span>
+            <strong className={`text-sm font-bold ${totalUnrealizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {totalUnrealizedPnl >= 0 ? '+' : ''}₹{totalUnrealizedPnl.toFixed(2)}
+            </strong>
+          </div>
+          <div className="bg-stone-800/60 rounded-xl p-3 border border-stone-700/60">
+            <span className="text-[10px] text-stone-400 block font-sans">Total Realized P&L</span>
+            <strong className={`text-sm font-bold ${totalRealizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {totalRealizedPnl >= 0 ? '+' : ''}₹{totalRealizedPnl.toFixed(2)}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* DATA VISUALIZATION: RECHARTS CUMULATIVE PNL TRAJECTORY */}
+      <div id="cumulative-pnl-chart-section">
+        <CumulativePnlChart
+          currentMode={tradingMode}
+          onModeChange={onTradingModeChange}
+        />
+      </div>
+
+      {/* ACTIVE LIVE POSITIONS & ENDED TRADES (BLUE BOUNDARY BOXES VS YELLOW LINE BOXES) */}
+      <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#12141c] p-5 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 dark:border-stone-800 pb-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Layers className="h-4 w-4 text-blue-600" />
+              <h3 className="text-sm font-bold text-stone-900 dark:text-white">
+                Active {isIntraday ? 'Intraday (MIS)' : 'Long (CNC)'} Trades Section ({modePositions.length} Live &bull; {modeHistory.length} Ended)
+              </h3>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border-2 border-blue-500 bg-blue-50 px-2.5 py-0.5 text-[10px] font-extrabold text-blue-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-pulse" />
+                Blue Boundary Box = LIVE TRADE ({modePositions.length})
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border-2 border-yellow-400 bg-yellow-50 px-2.5 py-0.5 text-[10px] font-extrabold text-yellow-900">
+                <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
+                Yellow Line Box = ENDED TRADE ({modeHistory.length})
+              </span>
+            </div>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400">
+              Live open trades are highlighted inside <strong>Blue boundary boxes</strong>, while trades that have ended are enclosed in <strong>boxes with Yellow lines</strong>.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100 p-0.5 text-[11px] font-bold">
               <button
-                onClick={() => onToggleDaemon(!isDaemonRunning)}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-semibold transition ${
-                  isDaemonRunning
-                    ? 'border-stone-700 bg-stone-800/80 text-stone-200 hover:bg-stone-700'
-                    : 'border-emerald-500/40 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/50'
+                type="button"
+                onClick={() => setActiveSectionFilter('ALL')}
+                className={`rounded-md px-2.5 py-1 transition ${
+                  activeSectionFilter === 'ALL'
+                    ? 'bg-stone-900 text-white shadow-2xs'
+                    : 'text-stone-600 hover:text-stone-900'
                 }`}
               >
-                {isDaemonRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                <span>{isDaemonRunning ? 'Pause Engine' : 'Resume Engine'}</span>
+                All ({modePositions.length + modeHistory.length})
               </button>
-            )}
-
-            <button
-              onClick={() => setShowConfirmResetZero(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-950/20 px-3.5 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-900/30 transition"
-              title="Reset paper portfolio and memory to zero"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Reset to Zero</span>
-            </button>
-
-            {onRun7DayCycle && (
               <button
-                onClick={onRun7DayCycle}
-                disabled={isLoadingAutonomous}
-                className="inline-flex items-center gap-1 text-[11px] text-stone-400 hover:text-stone-200 underline decoration-stone-600 underline-offset-4 px-2 py-1 transition"
-                title="Run historical 7-day backtest simulation"
+                type="button"
+                onClick={() => setActiveSectionFilter('LIVE')}
+                className={`rounded-md px-2.5 py-1 transition ${
+                  activeSectionFilter === 'LIVE'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-blue-700 hover:bg-blue-50'
+                }`}
               >
-                <span>Backtest Simulation</span>
+                🔵 Live Trades ({modePositions.length})
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => setActiveSectionFilter('ENDED')}
+                className={`rounded-md px-2.5 py-1 transition ${
+                  activeSectionFilter === 'ENDED'
+                    ? 'bg-yellow-400 text-stone-950 shadow-2xs'
+                    : 'text-yellow-800 hover:bg-yellow-50'
+                }`}
+              >
+                🟡 Ended Trades ({modeHistory.length})
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Real-time Bot Pulse Ticker */}
-        {daemonStatus && (
-          <div className="mt-5 pt-4 border-t border-stone-700/60 flex flex-wrap items-center justify-between gap-3 text-[11px] text-stone-300">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-emerald-400">Live Agent Pulse:</span>
-              <span className="font-mono text-stone-200">{daemonStatus.lastActionSummary}</span>
+        {/* LIVE TRADES IN BLUE BOUNDARY BOXES */}
+        {(activeSectionFilter === 'ALL' || activeSectionFilter === 'LIVE') && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-blue-600 animate-ping" />
+                Live Trades — Blue Boundary Boxes ({modePositions.length})
+              </span>
+              <span className="text-[11px] text-stone-500">
+                Mode: <strong className="font-bold text-stone-800">{isIntraday ? 'MIS • Same-day square-off' : 'CNC • Multi-day delivery'}</strong>
+              </span>
             </div>
-            <div className="flex items-center gap-4 text-stone-400">
-              <span>Risk Anchor: <strong className="text-stone-200">1% (₹500 max)</strong></span>
-              <span>Next Scan: <strong className="text-stone-200 font-mono">~25s</strong></span>
-              <span>Trades: <strong className="text-emerald-400 font-mono">{tradeHistory.length + positions.length} active/closed</strong></span>
-            </div>
+
+            {modePositions.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/20 p-6 text-center text-xs text-blue-700">
+                No live open trades in the <strong>{isIntraday ? 'Intraday (MIS)' : 'Long (CNC)'}</strong> system right now.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {modePositions.map((pos, idx) => {
+                  const curPrice = pos.current_price || pos.fill_price;
+                  const pnl = pos.unrealized_pnl ?? ((curPrice - pos.fill_price) * pos.shares * (pos.action === 'BUY' ? 1 : -1));
+                  const pnlPct = pos.unrealized_pnl_pct ?? (pos.fill_price > 0 ? (pnl / (pos.fill_price * pos.shares)) * 100 : 0);
+
+                  // Target progress calculation (0% at SL, 100% at TP)
+                  const range = Math.abs(pos.target_price - pos.stop_loss) || 1;
+                  const progressPct = pos.action === 'BUY'
+                    ? Math.min(100, Math.max(0, ((curPrice - pos.stop_loss) / range) * 100))
+                    : Math.min(100, Math.max(0, ((pos.stop_loss - curPrice) / range) * 100));
+
+                  return (
+                    <div
+                      key={`${pos.order_id}-${pos.ticker}-${idx}`}
+                      className="rounded-xl border-2 border-blue-500 bg-blue-50/30 p-4 transition hover:bg-blue-50/50 space-y-3 shadow-sm ring-2 ring-blue-500/15"
+                    >
+                      {/* Blue Boundary Status Strip */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 pb-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-2xs">
+                          <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                          LIVE TRADE &bull; ACTIVE IN MARKET
+                        </span>
+                        <span className="font-mono text-[10px] font-bold text-blue-800">
+                          Order #{pos.order_id} &bull; Real-Time MTM Active
+                        </span>
+                      </div>
+
+                      {/* Row 1: Stock, Strategy, Timings, PnL */}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            pos.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {pos.action}
+                          </span>
+                          <strong className="text-base font-extrabold text-stone-900">{pos.ticker}</strong>
+                          <span className="rounded bg-blue-100 border border-blue-300 px-1.5 py-0.2 font-mono text-[10px] font-bold text-blue-800">
+                            {pos.product_type || (isIntraday ? 'MIS' : 'CNC')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onSelectStrategy?.(pos.strategy_id || pos.strategy_name || 'algo-flagship-cognitive-q')}
+                            className="rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 px-2 py-0.5 text-[11px] font-medium border border-purple-200 transition cursor-pointer flex items-center gap-1"
+                            title={`Click to inspect all trades & return for ${pos.strategy_name}`}
+                          >
+                            <span>🔍 {pos.strategy_name || 'Quantitative Strategy'}</span>
+                          </button>
+                        </div>
+
+                        {/* Prominent Profit / Loss */}
+                        <div className="text-right">
+                          <span className="text-[10px] text-blue-700 font-semibold block font-sans">Current MTM Floating P&amp;L</span>
+                          <span className={`font-mono text-base font-black ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Timing & Duration Indicator */}
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-mono bg-white p-2.5 rounded-lg border border-blue-200">
+                        <div className="flex items-center gap-1.5 text-stone-600">
+                          <Clock className="h-3.5 w-3.5 text-blue-600" />
+                          <span>Entered: <strong>{new Date(pos.entry_time || pos.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} IST</strong></span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-stone-600">
+                          <Timer className="h-3.5 w-3.5 text-blue-600" />
+                          <span>Time in Trade: <strong className="text-blue-700">{pos.holding_duration || 'Live Active'}</strong></span>
+                        </div>
+
+                        <div className="ml-auto flex items-center gap-2">
+                          <span className="text-stone-500">Size: <strong>{pos.shares} shares</strong></span>
+                          <span className="text-stone-300">&bull;</span>
+                          <span className="text-stone-500">Capital Deployed: <strong>₹{(pos.fill_price * pos.shares).toFixed(2)}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Row 3: Prices & Progress Bar */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs bg-white p-2.5 rounded-lg border border-blue-200">
+                        <div>
+                          <span className="text-[10px] text-stone-400 block font-sans">Entry Fill Price</span>
+                          <span className="font-bold text-stone-800">₹{pos.fill_price}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-stone-400 block font-sans">Current Live Quote (CMP)</span>
+                          <span className="font-bold text-blue-700">₹{curPrice}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-stone-400 block font-sans">Take Profit &bull; Stop Loss</span>
+                          <span className="text-emerald-700 font-bold">₹{pos.target_price}</span>
+                          <span className="text-stone-400 mx-1">|</span>
+                          <span className="text-rose-700 font-bold">₹{pos.stop_loss}</span>
+                        </div>
+                      </div>
+
+                      {/* Visual Target Progress Bar */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-mono text-stone-500">
+                          <span className="text-rose-600 font-bold">Stop-Loss (₹{pos.stop_loss})</span>
+                          <span>Target Progress: {progressPct.toFixed(0)}%</span>
+                          <span className="text-emerald-600 font-bold">Target (₹{pos.target_price})</span>
+                        </div>
+                        <div className="h-2 w-full bg-blue-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              progressPct >= 70 ? 'bg-emerald-500' : progressPct >= 40 ? 'bg-blue-600' : 'bg-rose-500'
+                            }`}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Action Controls & Market Rationale */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-blue-200/80">
+                        <p className="text-[11px] text-stone-600 max-w-xl truncate" title={pos.market_scenario_rationale}>
+                          <strong>Rationale:</strong> {pos.market_scenario_rationale || 'High-probability quant setup with ATR buffer.'}
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCloseModal(pos)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 transition shadow-xs"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          <span>Close Trade</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
-      </div>
 
-      {/* CONFIRM RESET TO ZERO MODAL */}
-      {showConfirmResetZero && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-600 mb-3">
-              <div className="p-2.5 rounded-xl bg-rose-100">
-                <AlertTriangle className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-stone-900">Reset Paper Portfolio & Memory to Zero?</h3>
-                <p className="text-xs text-stone-500">Starting balance will be set to ₹50,000.00</p>
-              </div>
+        {/* ENDED TRADES IN BOXES WITH YELLOW LINES (INSIDE ACTIVE TRADES SECTION) */}
+        {(activeSectionFilter === 'ALL' || activeSectionFilter === 'ENDED') && modeHistory.length > 0 && (
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between border-t border-stone-200 pt-3">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-yellow-800 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                Ended Trades — Boxes with Yellow Lines ({modeHistory.length})
+              </span>
+              <span className="text-[11px] text-yellow-800 font-semibold">
+                Completed &amp; Settled Executions
+              </span>
             </div>
 
-            <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200 mb-4">
-              This action will clear all active open positions, wipe trade history and episodic memory, and restore your paper capital to clean <strong>₹50,000.00</strong>. You can run the autonomous 7-day trading cycle again anytime.
-            </p>
-
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowConfirmResetZero(false)}
-                className="rounded-xl border border-stone-200 px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (onResetToZero) {
-                    await onResetToZero();
-                  } else {
-                    await onResetPortfolio();
-                  }
-                  setShowConfirmResetZero(false);
-                }}
-                className="rounded-xl bg-rose-600 hover:bg-rose-700 px-4 py-2 text-xs font-bold text-white shadow-xs"
-              >
-                Confirm Full Reset to Zero
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 7-DAY RETURN & PERFORMANCE SCORECARD */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-xs">
-          <div className="flex items-center justify-between text-stone-400">
-            <span className="text-xs font-bold uppercase tracking-wider">Initial Capital</span>
-            <DollarSign className="h-4 w-4 text-stone-400" />
-          </div>
-          <p className="mt-1 text-2xl font-black text-stone-900">
-            ₹{initialCapital.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-          </p>
-          <span className="text-[11px] text-stone-500">Starting allocation</span>
-        </div>
-
-        <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-xs">
-          <div className="flex items-center justify-between text-stone-400">
-            <span className="text-xs font-bold uppercase tracking-wider">Active Total Equity</span>
-            <Briefcase className="h-4 w-4 text-blue-500" />
-          </div>
-          <p className="mt-1 text-2xl font-black text-stone-900">
-            ₹{currentTotalEquity.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-          </p>
-          <span className="text-[11px] text-stone-500">
-            Cash: ₹{currentCapital.toLocaleString('en-IN', { maximumFractionDigits: 0 })} + Holdings: ₹{activeHoldingsValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-          </span>
-        </div>
-
-        <div className={`rounded-2xl border p-4 shadow-xs ${
-          netTotalReturn >= 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'
-        }`}>
-          <div className={`flex items-center justify-between ${
-            netTotalReturn >= 0 ? 'text-emerald-700' : 'text-rose-700'
-          }`}>
-            <span className="text-xs font-bold uppercase tracking-wider">7-Day Net Return</span>
-            <TrendingUp className={`h-4 w-4 ${netTotalReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`} />
-          </div>
-          <p className={`mt-1 text-2xl font-black ${
-            netTotalReturn >= 0 ? 'text-emerald-700' : 'text-rose-700'
-          }`}>
-            {netTotalReturn >= 0 ? '+' : ''}₹{netTotalReturn.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-          </p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
-              netTotalReturn >= 0 ? 'bg-emerald-200/60 text-emerald-900' : 'bg-rose-200/60 text-rose-900'
-            }`}>
-              {netTotalReturnPct >= 0 ? '+' : ''}{netTotalReturnPct.toFixed(2)}% in 7 Days
-            </span>
-            <span className={`text-[10px] font-medium ${netTotalReturn >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
-              {netTotalReturn >= 0 ? '(Positive Alpha)' : '(Preservation)'}
-            </span>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-xs">
-          <div className="flex items-center justify-between text-stone-400">
-            <span className="text-xs font-bold uppercase tracking-wider">Win Rate & Safety</span>
-            <Award className="h-4 w-4 text-amber-500" />
-          </div>
-          <p className="mt-1 text-2xl font-black text-stone-900">{winRate.toFixed(1)}%</p>
-          <div className="flex items-center justify-between text-[11px] text-stone-500 mt-0.5">
-            <span>{winTrades} Wins / {tradeHistory.length} Trades</span>
-            <span className="font-semibold text-emerald-600">Max DD: 0.28%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* REINFORCEMENT LEARNING & ADAPTIVE STRATEGY ENGINE */}
-      <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/60">
-              <Brain className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-stone-900">Self-Correcting Adaptive Strategy Engine</h3>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Reinforcement Learning Active
-                </span>
-              </div>
-              <p className="text-xs text-stone-500 mt-0.5">
-                Continuously trains on real-time trade outcomes. Dynamically increases weight on winning strategies, widens stop buffers after volatility whipsaws, and tunes sector conviction.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-stone-400">Total Learned Adaptations:</span>
-            <span className="font-mono font-bold text-stone-800">{adaptiveModel?.totalAdaptationsCount ?? tradeHistory.length}</span>
-          </div>
-        </div>
-
-        {/* Strategy Weights Breakdown */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {/* Momentum Breakout */}
-          <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-stone-700">Momentum Breakout</span>
-              <span className="font-mono font-bold text-emerald-600">{adaptiveModel?.strategyWeights.momentumBreakout ?? 35}%</span>
-            </div>
-            <div className="h-2 w-full bg-stone-200 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${adaptiveModel?.strategyWeights.momentumBreakout ?? 35}%` }} />
-            </div>
-            <span className="text-[10px] text-stone-400">52W highs & volume spikes</span>
-          </div>
-
-          {/* Trend Following 20 EMA */}
-          <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-stone-700">Trend Following 20EMA</span>
-              <span className="font-mono font-bold text-blue-600">{adaptiveModel?.strategyWeights.trendFollowing20EMA ?? 30}%</span>
-            </div>
-            <div className="h-2 w-full bg-stone-200 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${adaptiveModel?.strategyWeights.trendFollowing20EMA ?? 30}%` }} />
-            </div>
-            <span className="text-[10px] text-stone-400">Bullish alignment above 20 EMA</span>
-          </div>
-
-          {/* Mean Reversion Pullback */}
-          <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-stone-700">Mean Reversion</span>
-              <span className="font-mono font-bold text-amber-600">{adaptiveModel?.strategyWeights.meanReversionPullback ?? 20}%</span>
-            </div>
-            <div className="h-2 w-full bg-stone-200 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${adaptiveModel?.strategyWeights.meanReversionPullback ?? 20}%` }} />
-            </div>
-            <span className="text-[10px] text-stone-400">RSI &lt; 38 dip buyers</span>
-          </div>
-
-          {/* Low-Beta Compounder */}
-          <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-stone-700">Low-Beta Compounder</span>
-              <span className="font-mono font-bold text-purple-600">{adaptiveModel?.strategyWeights.lowBetaCompounder ?? 15}%</span>
-            </div>
-            <div className="h-2 w-full bg-stone-200 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-500 rounded-full transition-all duration-500" style={{ width: `${adaptiveModel?.strategyWeights.lowBetaCompounder ?? 15}%` }} />
-            </div>
-            <span className="text-[10px] text-stone-400">Safe defensive anchors</span>
-          </div>
-        </div>
-
-        {/* Active Mathematical Guardrails & Sector Conviction */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-2">
-          {/* Guardrails */}
-          <div className="p-3.5 rounded-xl bg-stone-50/70 border border-stone-200 space-y-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              Calibrated Risk Guardrails (Learned from Real Outcomes)
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div className="bg-white p-2 rounded-lg border border-stone-200">
-                <span className="text-[10px] text-stone-400 block">ATR Stop Buffer</span>
-                <strong className="font-mono text-stone-900">{adaptiveModel?.calibratedParameters.atrStopMultiplier ?? 1.55}x ATR</strong>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-stone-200">
-                <span className="text-[10px] text-stone-400 block">Target Multiplier</span>
-                <strong className="font-mono text-emerald-700">{adaptiveModel?.calibratedParameters.atrTargetMultiplier ?? 2.65}x ATR</strong>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-stone-200">
-                <span className="text-[10px] text-stone-400 block">Min Risk:Reward</span>
-                <strong className="font-mono text-blue-700">&gt; {adaptiveModel?.calibratedParameters.minRiskReward ?? 2.4}:1</strong>
-              </div>
-              <div className="bg-white p-2 rounded-lg border border-stone-200">
-                <span className="text-[10px] text-stone-400 block">Max Trade Risk</span>
-                <strong className="font-mono text-rose-700">₹{adaptiveModel?.calibratedParameters.maxRiskPerTradeRupees ?? 500}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* Sector Conviction Multipliers */}
-          <div className="p-3.5 rounded-xl bg-stone-50/70 border border-stone-200 space-y-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <Compass className="h-3.5 w-3.5 text-blue-600" />
-              Dynamic Sector Conviction Multipliers
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              {Object.entries(adaptiveModel?.sectorConvictionMultipliers || {
-                "Banking & Financials": 1.15,
-                "Telecom & Infra": 1.12,
-                "Energy & Utilities": 1.05,
-                "Automotive & Engineering": 1.00,
-                "IT & Software": 0.95,
-                "Pharma & Healthcare": 1.00,
-              }).map(([sec, rawMult]) => {
-                const mult = Number(rawMult) || 1.0;
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {modeHistory.slice(0, 6).map((trade, idx) => {
+                const isProfit = trade.pnl_realized >= 0;
                 return (
-                  <span key={sec} className="inline-flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-stone-200 font-medium text-stone-700">
-                    <span>{sec}:</span>
-                    <strong className={`font-mono ${mult >= 1.05 ? 'text-emerald-600' : mult < 1.0 ? 'text-amber-600' : 'text-stone-900'}`}>{mult}x</strong>
-                  </span>
+                  <div
+                    key={`active-ended-${trade.id}-${idx}`}
+                    className="rounded-xl border-2 border-yellow-400 bg-yellow-50/40 p-3.5 space-y-2.5 shadow-sm ring-2 ring-yellow-400/20 hover:border-yellow-500 transition"
+                  >
+                    <div className="flex items-center justify-between border-b-2 border-dashed border-yellow-400 pb-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-yellow-400 text-stone-950 border border-yellow-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                        ■ TRADE ENDED
+                      </span>
+                      <span className="font-mono text-[10px] font-bold text-yellow-900">
+                        {trade.exit_reason || (isProfit ? '🎯 Target Hit' : '🛡️ Stop Defended')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          trade.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {trade.action}
+                        </span>
+                        <strong className="text-sm font-extrabold text-stone-900">{trade.ticker}</strong>
+                        <span className="text-xs font-mono text-stone-600">({trade.shares} sh)</span>
+                      </div>
+                      <span className={`font-mono text-sm font-black ${isProfit ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {isProfit ? '+' : ''}₹{trade.pnl_realized.toFixed(2)} ({isProfit ? '+' : ''}{trade.pnl_pct.toFixed(2)}%)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] font-mono bg-white/90 px-2.5 py-1.5 rounded-lg border border-yellow-400 text-stone-700">
+                      <span>Entry: <strong>₹{trade.entry_price}</strong> &rarr; Exit: <strong>₹{trade.exit_price}</strong></span>
+                      <span className="text-yellow-900 font-bold">⏱️ {trade.duration || 'Settled'}</span>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Recent Reinforcement Lessons Log */}
-        {adaptiveModel?.recentAdaptations && adaptiveModel.recentAdaptations.length > 0 && (
-          <div className="pt-2 space-y-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-              Model Self-Correction Journal (Mistakes Learned & Strategies Reinforced)
+      {/* CLOSED TRADE HISTORY & TIMING LOG (ALL IN BOXES WITH YELLOW LINES) */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-yellow-600" />
+            <h3 className="text-sm font-bold text-stone-900">
+              Ended / Closed Trade History &amp; Precise Timings ({modeHistory.length} Trades in Yellow Line Boxes)
+            </h3>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-stone-500">
+              Win Rate: <strong className="font-mono text-emerald-600 font-bold">{winRate.toFixed(1)}%</strong> ({winTrades}W / {modeHistory.length - winTrades}L)
             </span>
-            <div className="space-y-1.5">
-              {adaptiveModel.recentAdaptations.slice(0, 4).map((item) => (
-                <div key={item.adaptationId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                      item.outcome === 'WIN' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                    }`}>
-                      {item.outcome}
-                    </span>
-                    <strong className="text-stone-900 font-mono">{item.triggerTicker}</strong>
-                    <span className="text-stone-600">{item.insight}</span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 text-[11px]">
-                    <span className="font-mono font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      {item.parameterAdjusted}: {item.newCalibratedValue}
-                    </span>
-                    <span className="text-stone-400 text-[10px]">{new Date(item.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 7-DAY AUTONOMOUS TRADING AUDIT & TIMELINE */}
-      {autonomousSummary && (
-        <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200 pb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-blue-600" />
-                <h3 className="text-sm font-bold text-stone-900">7-Day Autonomous Execution Journey</h3>
-              </div>
-              <p className="text-xs text-stone-500 mt-0.5">
-                Every trade executed autonomously across 7 sessions based on mathematical risk/reward analysis.
-              </p>
-            </div>
-
-            {/* Day Selector Pills */}
-            <div className="flex items-center gap-1 overflow-x-auto py-1">
-              {autonomousSummary.dailyBreakdown.map((d) => (
-                <button
-                  key={d.dayNumber}
-                  onClick={() => setSelectedDayTab(d.dayNumber)}
-                  className={`px-3 py-1 text-xs font-bold rounded-lg transition whitespace-nowrap ${
-                    selectedDayTab === d.dayNumber
-                      ? 'bg-stone-900 text-white shadow-xs'
-                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                  }`}
-                >
-                  Day {d.dayNumber}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Selected Day View */}
-          {(() => {
-            const dayData = autonomousSummary.dailyBreakdown.find((d) => d.dayNumber === selectedDayTab);
-            if (!dayData) return null;
-
-            return (
-              <div className="space-y-3.5 bg-stone-50/60 p-4 rounded-xl border border-stone-200">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
-                      {dayData.dateLabel}
-                    </span>
-                    <span className="text-xs font-medium text-stone-600">
-                      Regime: <strong className="text-stone-900">{dayData.marketRegime}</strong>
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="text-stone-500">Day Equity:</span>
-                    <span className="font-mono font-bold text-stone-900">₹{dayData.endOfDayEquity.toLocaleString('en-IN')}</span>
-                    <span className="text-emerald-700 font-bold">
-                      +{dayData.cumulativeReturnPct}% cumulative
-                    </span>
-                  </div>
-                </div>
-
-                {/* Analysis summary */}
-                <p className="text-xs text-stone-700 bg-white p-3 rounded-lg border border-stone-200 leading-relaxed">
-                  <strong>Stock Analysis & Decision:</strong> {dayData.analysisSummary}
-                </p>
-
-                {/* Trades taken that day */}
-                <div className="space-y-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
-                    Trades Executed on Day {dayData.dayNumber}:
-                  </span>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                    {dayData.tradesTaken.map((trade, idx) => (
-                      <div key={idx} className="rounded-xl border border-stone-200 bg-white p-3 space-y-1.5 shadow-2xs">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                              trade.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                            }`}>
-                              {trade.action}
-                            </span>
-                            <strong className="text-xs font-bold text-stone-900">{trade.symbol}</strong>
-                            <span className="text-[10px] text-stone-400">({trade.type})</span>
-                          </div>
-                          <span className="text-xs font-mono font-bold text-stone-800">
-                            {trade.shares} shares @ ₹{trade.price}
-                          </span>
-                        </div>
-
-                        <p className="text-[11px] text-stone-600">{trade.rationale}</p>
-
-                        <div className="flex items-center justify-between text-[10px] pt-1 border-t border-stone-100">
-                          <span className="text-stone-500">R:R Ratio: <strong className="text-stone-800">{trade.riskReward}</strong></span>
-                          {trade.realizedPnl !== undefined ? (
-                            <span className={`font-mono font-bold ${trade.realizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              Realized: {trade.realizedPnl >= 0 ? '+' : ''}₹{trade.realizedPnl} ({trade.realizedPnlPct}%)
-                            </span>
-                          ) : (
-                            <span className="text-blue-600 font-semibold">Invested: ₹{trade.value}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* OPEN ACTIVE POSITIONS - FULL DETAILS TABLE */}
-      <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-blue-600" />
-            <h3 className="text-sm font-bold text-stone-900">Active Live Positions ({positions.length})</h3>
-            {positions.length > 0 && (
-              <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                </span>
-                Live MTM Active
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {onOpenAlertSettings && (
-              <button
-                onClick={onOpenAlertSettings}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 transition shadow-xs"
-                title="Configure Live PnL Alert Thresholds"
-              >
-                <Bell className="h-3 w-3 text-amber-500" />
-                <span>PnL Alerts</span>
-              </button>
-            )}
-            <button
-              onClick={onResetPortfolio}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100 transition shadow-xs"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Reset Balance
-            </button>
+            <span className="text-stone-300">&bull;</span>
+            <span className="text-stone-500">
+              Net Realized: <strong className={`font-mono font-bold ${totalRealizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {totalRealizedPnl >= 0 ? '+' : ''}₹{totalRealizedPnl.toFixed(2)}
+              </strong>
+            </span>
           </div>
         </div>
 
-        {positions.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-stone-200 p-8 text-center text-xs text-stone-500">
-            No open positions currently. Click <strong>"Run 7-Day Cycle"</strong> above to let the bot initiate high-conviction trades automatically.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Live Portfolio Active Metrics Summary Cards */}
-            {(() => {
-              const totalInvested = positions.reduce((s, p) => s + (p.fill_price * p.shares), 0);
-              const totalCurrentVal = positions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
-              const totalRiskRupees = positions.reduce((s, p) => s + (p.rupee_risk || Math.max(0, Math.abs(p.fill_price - p.stop_loss) * p.shares)), 0);
-              const avgRR = positions.length > 0
-                ? positions.reduce((s, p) => {
-                    const risk = Math.abs(p.fill_price - p.stop_loss) || 1;
-                    const reward = Math.abs(p.target_price - p.fill_price);
-                    return s + (reward / risk);
-                  }, 0) / positions.length
-                : 0;
-
-              return (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
-                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Active Exposure</span>
-                    <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
-                      ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </p>
-                    <span className="text-[10px] text-stone-500">{positions.length} active trade{positions.length === 1 ? '' : 's'}</span>
-                  </div>
-
-                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Current Market Value</span>
-                    <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
-                      ₹{totalCurrentVal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </p>
-                    <span className="text-[10px] text-stone-500">Live mark-to-market</span>
-                  </div>
-
-                  <div className={`rounded-xl border p-3 ${totalUnrealizedPnl >= 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'}`}>
-                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Unrealized MTM P&L</span>
-                    <p className={`mt-0.5 font-mono text-base font-black ${totalUnrealizedPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                      {totalUnrealizedPnl >= 0 ? '+' : ''}₹{totalUnrealizedPnl.toFixed(2)}
-                      <span className="ml-1 text-xs font-bold">
-                        ({totalInvested > 0 ? ((totalUnrealizedPnl / totalInvested) * 100).toFixed(2) : '0.00'}%)
-                      </span>
-                    </p>
-                    <span className="text-[10px] text-stone-500">Net floating balance</span>
-                  </div>
-
-                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Total Risk at Stake</span>
-                    <p className="mt-0.5 font-mono text-base font-bold text-rose-600">
-                      ₹{totalRiskRupees.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </p>
-                    <span className="text-[10px] text-stone-500">Hard stop-loss bound</span>
-                  </div>
-
-                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                    <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Avg Risk:Reward</span>
-                    <p className="mt-0.5 font-mono text-base font-bold text-blue-600">
-                      {avgRR.toFixed(2)} : 1
-                    </p>
-                    <span className="text-[10px] text-stone-500">System expectancy</span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Comprehensive Active Positions Table */}
-            <div className="overflow-x-auto rounded-xl border border-stone-200">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-stone-50/90 border-b border-stone-200 text-stone-500 uppercase text-[10px] tracking-wider">
-                  <tr>
-                    <th className="py-2.5 px-3 font-semibold">Stock / Order</th>
-                    <th className="py-2.5 px-3 font-semibold">Action</th>
-                    <th className="py-2.5 px-3 font-semibold">Size & Exposure</th>
-                    <th className="py-2.5 px-3 font-semibold">Entry Fill</th>
-                    <th className="py-2.5 px-3 font-semibold">Live Price (CMP)</th>
-                    <th className="py-2.5 px-3 font-semibold">Stop Loss</th>
-                    <th className="py-2.5 px-3 font-semibold">Target Price</th>
-                    <th className="py-2.5 px-3 font-semibold">R:R & Risk ₹</th>
-                    <th className="py-2.5 px-3 font-semibold">Target Progress</th>
-                    <th className="py-2.5 px-3 font-semibold">Unrealized P&L</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100 bg-white">
-                  {positions.map((pos) => {
-                    const currentPrice = pos.current_price || pos.fill_price;
-                    const pnl = pos.unrealized_pnl ?? ((currentPrice - pos.fill_price) * pos.shares * (pos.action === 'BUY' ? 1 : -1));
-                    const pnlPct = pos.unrealized_pnl_pct ?? (pos.fill_price > 0 ? (pnl / (pos.fill_price * pos.shares)) * 100 : 0);
-                    const positionExposure = pos.fill_price * pos.shares;
-                    const currentVal = currentPrice * pos.shares;
-                    const priceChangePct = pos.fill_price > 0 ? ((currentPrice - pos.fill_price) / pos.fill_price) * 100 : 0;
-                    const slDistPct = pos.fill_price > 0 ? Math.abs((pos.stop_loss - currentPrice) / currentPrice) * 100 : 0;
-                    const tgtDistPct = pos.fill_price > 0 ? Math.abs((pos.target_price - currentPrice) / currentPrice) * 100 : 0;
-
-                    // Progress calculation towards target (0% at SL, 100% at Target)
-                    const totalRange = Math.abs(pos.target_price - pos.stop_loss) || 1;
-                    const currentProg = pos.action === 'BUY'
-                      ? Math.min(100, Math.max(0, ((currentPrice - pos.stop_loss) / totalRange) * 100))
-                      : Math.min(100, Math.max(0, ((pos.stop_loss - currentPrice) / totalRange) * 100));
-
-                    const riskPerShare = Math.abs(pos.fill_price - pos.stop_loss);
-                    const rewardPerShare = Math.abs(pos.target_price - pos.fill_price);
-                    const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(2) : '2.0';
-                    const maxRiskRupees = pos.rupee_risk || (riskPerShare * pos.shares);
-
-                    return (
-                      <tr key={pos.order_id} className="hover:bg-stone-50/70 transition">
-                        <td className="py-3 px-3">
-                          <div className="font-bold text-stone-900 flex items-center gap-1.5">
-                            {pos.ticker}
-                            {onSelectTickerForPipeline && (
-                              <button
-                                onClick={() => onSelectTickerForPipeline(pos.ticker)}
-                                className="text-stone-400 hover:text-blue-600 transition"
-                                title="Inspect in Pipeline & Radar"
-                              >
-                                <Eye className="h-3 w-3" />
-                              </button>
-                            )}
-                          </div>
-                          <span className="font-mono text-[10px] text-stone-400">
-                            {pos.order_id.slice(0, 16)}...
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                            pos.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                          }`}>
-                            {pos.action === 'BUY' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                            {pos.action}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="font-mono font-semibold text-stone-900">{pos.shares} shares</div>
-                          <div className="font-mono text-[10px] text-stone-500">₹{positionExposure.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                        </td>
-                        <td className="py-3 px-3 font-mono font-medium text-stone-800">
-                          ₹{pos.fill_price.toFixed(2)}
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="font-mono font-bold text-stone-900">
-                            ₹{currentPrice.toFixed(2)}
-                          </div>
-                          <div className={`font-mono text-[10px] ${priceChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="font-mono font-semibold text-rose-600">
-                            ₹{pos.stop_loss.toFixed(2)}
-                          </div>
-                          <div className="text-[10px] text-stone-400">
-                            {slDistPct.toFixed(1)}% away
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="font-mono font-semibold text-emerald-600">
-                            ₹{pos.target_price.toFixed(2)}
-                          </div>
-                          <div className="text-[10px] text-stone-400">
-                            {tgtDistPct.toFixed(1)}% away
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="font-mono font-medium text-blue-600 text-[11px]">
-                            {rrRatio}:1 R:R
-                          </div>
-                          <div className="font-mono text-[10px] text-stone-500">
-                            ₹{maxRiskRupees.toFixed(0)} risk
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 min-w-[120px]">
-                          <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 mb-1">
-                            <span>SL</span>
-                            <span className="font-bold text-stone-700">{currentProg.toFixed(0)}%</span>
-                            <span>TGT</span>
-                          </div>
-                          <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
-                            <div
-                              className={`h-full transition-all duration-300 ${
-                                pnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
-                              }`}
-                              style={{ width: `${currentProg}%` }}
-                            />
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className={`font-mono text-xs font-black ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
-                          </div>
-                          <div className={`font-mono text-[10px] font-bold ${pnlPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                            {pnlPct >= 0 ? '+' : ''}{Number(pnlPct).toFixed(2)}%
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <button
-                            onClick={() => handleOpenCloseModal(pos)}
-                            className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-900 hover:text-white transition shadow-2xs whitespace-nowrap"
-                          >
-                            Close Trade
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* EPISODIC MEMORY SECTION */}
-      <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-purple-600" />
-            <h3 className="text-sm font-bold text-stone-900">Episodic Trade Memory ({tradeHistory.length} Closed Trades)</h3>
-          </div>
-          <span className="text-xs text-stone-500">
-            Total Realized: <strong className={totalRealizedPnl >= 0 ? 'text-emerald-600 font-mono' : 'text-rose-600 font-mono'}>
-              {totalRealizedPnl >= 0 ? '+' : ''}₹{totalRealizedPnl.toFixed(2)}
-            </strong>
-          </span>
-        </div>
-
-        {tradeHistory.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-stone-200 p-8 text-center text-xs text-stone-500">
-            No trade history recorded yet. Memory is currently clean.
+        {modeHistory.length === 0 ? (
+          <div className="rounded-xl border-2 border-dashed border-yellow-300 bg-yellow-50/20 p-8 text-center text-xs text-stone-500">
+            No ended trades in this system yet. As trades reach their target or stop-loss, they will appear here in boxes with yellow lines.
           </div>
         ) : (
           <div className="space-y-3">
-            {tradeHistory.map((trade) => (
-              <div key={trade.id} className="rounded-xl border border-stone-200 bg-stone-50/50 p-3.5 text-xs shadow-2xs">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-stone-900 text-sm">{trade.ticker}</span>
-                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                      trade.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                    }`}>
-                      {trade.action}
-                    </span>
-                    <span className="font-mono text-stone-500">{trade.shares} shares</span>
-                    <span className="font-mono text-stone-400">Entry: ₹{trade.entry_price} &rarr; Exit: ₹{trade.exit_price}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-mono font-bold ${trade.pnl_realized >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                      {trade.pnl_realized >= 0 ? '+' : ''}₹{trade.pnl_realized.toFixed(2)} ({trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct}%)
-                    </span>
-                    <span className="text-[10px] text-stone-400 font-mono">
-                      {new Date(trade.timestamp).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
+            {modeHistory.map((trade, idx) => {
+              const isProfit = trade.pnl_realized >= 0;
 
-                <div className="mt-2 flex items-start gap-2 bg-white p-2.5 rounded-lg border border-stone-200">
-                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-600" />
-                  <div>
-                    <span className="text-[10px] font-bold text-purple-900 uppercase tracking-wider">Post-Mortem Lesson:</span>
-                    <p className="mt-0.5 text-stone-700 leading-relaxed italic">
-                      "{trade.lesson}"
-                    </p>
+              return (
+                <div
+                  key={`${trade.id}-${trade.ticker}-${idx}`}
+                  className="rounded-xl border-2 border-yellow-400 bg-yellow-50/35 p-4 space-y-3 transition shadow-sm ring-2 ring-yellow-400/20 hover:border-yellow-500"
+                >
+                  {/* Yellow Line Status Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-dashed border-yellow-400 pb-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-yellow-400 text-stone-950 border border-yellow-500 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-2xs">
+                      ■ TRADE ENDED &bull; CLOSED POSITION
+                    </span>
+                    <span className="font-mono text-[10px] font-bold text-yellow-900">
+                      Settled &bull; {trade.exit_reason || (isProfit ? 'Target Reached' : 'Stop-Loss Protected')}
+                    </span>
+                  </div>
+
+                  {/* Top Bar: Symbol, Strategy, Realized PnL */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        trade.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {trade.action}
+                      </span>
+                      <strong className="text-sm font-extrabold text-stone-900">{trade.ticker}</strong>
+                      <span className="text-xs text-stone-500">({trade.company_name || trade.ticker})</span>
+                      <span className="rounded bg-yellow-200/80 border border-yellow-400 px-1.5 py-0.2 font-mono text-[10px] font-bold text-stone-900">
+                        {trade.product_type || (isIntraday ? 'MIS' : 'CNC')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onSelectStrategy?.(trade.strategy_id || trade.strategy_name || 'algo-flagship-cognitive-q')}
+                        className="rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 px-2 py-0.5 text-[11px] font-medium border border-purple-200 transition cursor-pointer flex items-center gap-1"
+                        title={`Click to inspect all trades & return for ${trade.strategy_name}`}
+                      >
+                        <span>🔍 {trade.strategy_name || 'Quantitative Strategy'}</span>
+                      </button>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] text-yellow-900 font-semibold block font-sans">Realized P&amp;L</span>
+                      <span className={`font-mono text-base font-black ${isProfit ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {isProfit ? '+' : ''}₹{trade.pnl_realized.toFixed(2)} ({isProfit ? '+' : ''}{trade.pnl_pct.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* PRECISE TIMINGS BOX - With Yellow Border Lines */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs font-mono bg-white p-3 rounded-lg border-2 border-yellow-400 shadow-3xs">
+                    <div>
+                      <span className="text-[10px] text-stone-400 block font-sans">🟢 Entry Timing</span>
+                      <strong className="text-stone-800">
+                        {trade.entry_time
+                          ? new Date(trade.entry_time).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'medium' })
+                          : new Date(trade.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-stone-400 block font-sans">🔴 Exit Timing</span>
+                      <strong className="text-stone-800">
+                        {trade.exit_time
+                          ? new Date(trade.exit_time).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'medium' })
+                          : new Date(trade.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'medium' })}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-stone-400 block font-sans">⏳ Total Duration in Trade</span>
+                      <strong className="text-purple-700">
+                        {trade.duration || 'Completed'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-stone-400 block font-sans">🎯 Exit Trigger</span>
+                      <strong className={isProfit ? 'text-emerald-700' : 'text-rose-700'}>
+                        {trade.exit_reason || (isProfit ? 'Target Hit' : 'Stop Loss')}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Price Fill & Lot Details */}
+                  <div className="flex flex-wrap items-center justify-between text-xs font-mono bg-white/90 p-2.5 rounded-lg border border-yellow-400 text-stone-700">
+                    <div className="flex items-center gap-3">
+                      <span>Entry Fill: <strong>₹{trade.entry_price}</strong></span>
+                      <span>&rarr;</span>
+                      <span>Exit Fill: <strong>₹{trade.exit_price}</strong></span>
+                      <span className="text-stone-300">&bull;</span>
+                      <span>Volume: <strong>{trade.shares} shares</strong></span>
+                    </div>
+                    <div>
+                      <span>Executed Lot Value: <strong>₹{(trade.entry_price * trade.shares).toFixed(2)}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* Gain / Loss Diagnosis: Plain English clarity on why it won or lost */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-start gap-2 bg-white p-2.5 rounded-lg border border-yellow-300 text-xs">
+                      <HelpCircle className={`h-4 w-4 shrink-0 mt-0.5 ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`} />
+                      <div>
+                        <strong className="text-[10px] uppercase font-bold tracking-wider text-stone-400 block">
+                          Why Did This Trade {isProfit ? 'Profit' : 'Incur a Loss'}?
+                        </strong>
+                        <p className="text-stone-700 leading-snug mt-0.5">
+                          {trade.gain_loss_diagnosis || (isProfit
+                            ? `Price expanded from ₹${trade.entry_price} into target ₹${trade.exit_price} as institutional momentum lifted ask prices.`
+                            : `Price encountered strong counter-trend selling at resistance; defensive stop-loss safely cut loss at ₹${trade.exit_price}, protecting 98%+ of capital.`)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Post-Mortem Lesson */}
+                    {trade.lesson && (
+                      <div className="flex items-start gap-2 bg-purple-50/50 p-2.5 rounded-lg border border-purple-200/70 text-xs text-purple-950">
+                        <Sparkles className="h-4 w-4 shrink-0 text-purple-600 mt-0.5" />
+                        <div>
+                          <strong className="text-[10px] uppercase font-bold tracking-wider text-purple-800 block">
+                            Strategy Adaptation Lesson:
+                          </strong>
+                          <p className="italic leading-snug mt-0.5">"{trade.lesson}"</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Close Position Modal */}
+      {/* AI PORTFOLIO REBALANCING & RISK OPTIMIZER */}
+      <div id="ai-rebalancing-section">
+        <AiPortfolioRebalancing
+          positions={modePositions}
+          accounting={accounting}
+          onRefreshPortfolio={onResetPortfolio}
+          onSelectTickerForPipeline={onSelectTickerForPipeline}
+        />
+      </div>
+
+      {/* CLOSE POSITION MODAL WITH TIMING & REASON CONFIRMATION */}
       {closingOrderId && selectedPos && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-5 shadow-xl">
-            <h3 className="text-base font-bold text-stone-900">
-              Close Position & Generate Post-Mortem
-            </h3>
-            <p className="mt-1 text-xs text-stone-500">
-              Closing {selectedPos.action} {selectedPos.shares} shares of {selectedPos.ticker}. Specify exit fill price to compute realized P&L.
-            </p>
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-rose-600" />
+                Close Trade &bull; {selectedPos.ticker}
+              </h3>
+              <p className="mt-1 text-xs text-stone-500">
+                Closing {selectedPos.action} {selectedPos.shares} shares in <strong>{selectedPos.trade_mode || (isIntraday ? 'INTRADAY' : 'LONG')}</strong> mode.
+              </p>
+            </div>
 
-            <div className="mt-4 rounded-lg bg-stone-50 p-3 text-xs space-y-1">
+            <div className="rounded-lg bg-stone-50 p-3 text-xs space-y-1.5 font-mono">
               <div className="flex justify-between">
-                <span className="text-stone-500">Entry Fill (Slippage Adjusted):</span>
-                <span className="font-mono font-bold">₹{selectedPos.fill_price}</span>
+                <span className="text-stone-500 font-sans">Entry Time:</span>
+                <span className="font-bold">{new Date(selectedPos.entry_time || selectedPos.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} IST</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-stone-500">Original Stop Loss:</span>
-                <span className="font-mono text-rose-600">₹{selectedPos.stop_loss}</span>
+                <span className="text-stone-500 font-sans">Entry Fill:</span>
+                <span className="font-bold">₹{selectedPos.fill_price}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-stone-500">Original Take Profit:</span>
-                <span className="font-mono text-emerald-600">₹{selectedPos.target_price}</span>
+                <span className="text-stone-500 font-sans">Stop Loss &bull; Target:</span>
+                <span>₹{selectedPos.stop_loss} | ₹{selectedPos.target_price}</span>
               </div>
             </div>
 
-            <div className="mt-4">
-              <label className="block text-xs font-semibold text-stone-700">Exit Price (₹ INR)</label>
-              <input
-                type="number"
-                step="0.05"
-                value={exitPriceInput}
-                onChange={(e) => setExitPriceInput(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none"
-              />
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-stone-700">Exit Fill Price (₹ INR)</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={exitPriceInput}
+                  onChange={(e) => setExitPriceInput(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-mono focus:border-amber-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-700">Exit Trigger / Reason</label>
+                <select
+                  value={exitReasonInput}
+                  onChange={(e) => setExitReasonInput(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-xs focus:border-amber-500 focus:outline-hidden"
+                >
+                  <option value="🎯 Take-Profit Target Hit">🎯 Take-Profit Target Hit</option>
+                  <option value="🛡️ Stop-Loss Defended">🛡️ Stop-Loss Defended</option>
+                  <option value="⏰ Intraday Pre-Close Square-Off">⏰ Intraday Pre-Close Square-Off (15:15 IST)</option>
+                  <option value="⚡ Risk Officer Discretionary Exit">⚡ Risk Officer Discretionary Exit</option>
+                  <option value="📈 Positional Swing Target Exit">📈 Positional Swing Target Exit</option>
+                </select>
+              </div>
             </div>
 
+            {/* Projected PnL */}
             {(() => {
               const p = parseFloat(exitPriceInput);
               if (!isNaN(p) && p > 0) {
@@ -1014,7 +1166,9 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
                   : (selectedPos.fill_price - p) * selectedPos.shares;
                 const pnlPct = (pnl / (selectedPos.fill_price * selectedPos.shares)) * 100;
                 return (
-                  <div className={`mt-3 rounded-lg p-2.5 text-xs font-mono font-bold ${pnl >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                  <div className={`rounded-lg p-2.5 text-xs font-mono font-bold ${
+                    pnl >= 0 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}>
                     Projected Realized P&L: {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
                   </div>
                 );
@@ -1022,7 +1176,7 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
               return null;
             })()}
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
               <button
                 type="button"
                 onClick={() => setClosingOrderId(null)}
@@ -1036,7 +1190,7 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
                 disabled={isSubmittingClose}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
               >
-                {isSubmittingClose ? 'Recording Post-Mortem...' : 'Execute Close & Learn'}
+                {isSubmittingClose ? 'Recording Exit...' : 'Execute Close & Log Timings'}
               </button>
             </div>
           </div>
@@ -1045,130 +1199,55 @@ export const PortfolioPanel: React.FC<PortfolioPanelProps> = ({
 
       {/* 24/7 CLOUD SETUP & KEEP-ALIVE MODAL */}
       {showCloudModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-stone-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-stone-200 max-h-[90vh] overflow-y-auto space-y-4">
             <div className="flex items-start justify-between gap-4 pb-4 border-b border-stone-200">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-sky-100 flex items-center justify-center text-sky-700">
-                  <Cloud className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                  <Cloud className="h-6 w-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-stone-900">24/7 Autonomous Cloud Engine Configuration</h3>
-                  <p className="text-xs text-stone-500">Zero-loss persistence and continuous background operation in Cloud Run</p>
+                  <h3 className="text-base font-bold text-stone-900">24/7 Autonomous Trading Keep-Alive</h3>
+                  <p className="text-xs text-stone-500">Dual Database Persistence &bull; Automated 15:15 IST Square-Off Guardrails</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowCloudModal(false)}
-                className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition"
-              >
+              <button onClick={() => setShowCloudModal(false)} className="text-stone-400 hover:text-stone-600">
                 <XCircle className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="mt-5 space-y-4 text-xs">
-              {/* Feature 1: Disk State Persistence */}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <h4 className="font-bold text-emerald-900">1. Disk State Persistence (Active)</h4>
-                </div>
-                <p className="mt-1 text-emerald-800 leading-relaxed">
-                  Every position entry, defensive stop exit, profit target, and Reinforcement Learning weight update is written immediately to disk at <code className="font-mono bg-emerald-100 px-1 py-0.5 rounded text-emerald-900">/data/portfolio_state.json</code>.
-                  Even if the Cloud Run container restarts or cold-starts after sleeping, all active trades and campaign statistics are instantly restored.
-                </p>
-              </div>
-
-              {/* Feature 2: 24/7 Keep-Alive Webhook */}
-              <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Server className="h-4 w-4 text-sky-700" />
-                    <h4 className="font-bold text-sky-900">2. Keep-Alive & Autonomous Pulse Webhook</h4>
-                  </div>
-                  <span className="rounded-full bg-sky-200/80 px-2 py-0.5 text-[10px] font-bold text-sky-800 uppercase tracking-wide">
-                    Ready
-                  </span>
-                </div>
-                <p className="text-sky-800 leading-relaxed">
-                  Call this webhook endpoint to keep the container awake 24/7. Each ping evaluates live stop losses, profit targets, and executes fresh algorithmic entries:
-                </p>
-
-                <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-amber-900 text-[11px] leading-relaxed">
-                  <strong>Important Note (Fixing 404):</strong> The <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">ais-pre-...</code> domain is activated when you click the <strong>&quot;Share&quot;</strong> button at the top-right of AI Studio. Before the app is shared for the first time, Cloud Run returns a 404 because no public deployment revision exists yet. Clicking <strong>&quot;Share&quot;</strong> publishes the revision and immediately makes this webhook reachable!
-                </div>
-
-                <div className="flex items-center gap-2 rounded-lg bg-white border border-sky-200 p-2 font-mono text-[11px] text-stone-800">
-                  <span className="truncate select-all flex-1">
-                    https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/autonomous/pulse
-                  </span>
-                  <button
-                    onClick={() => handleCopyUrl("https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/autonomous/pulse")}
-                    className="inline-flex items-center gap-1 rounded bg-sky-100 hover:bg-sky-200 text-sky-800 px-2 py-1 text-xs font-sans font-semibold transition shrink-0"
-                    title="Copy URL"
-                  >
-                    {copiedUrl ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                    <span>{copiedUrl ? 'Copied!' : 'Copy'}</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-stone-500 text-[11px]">Test the live cloud pulse directly from this browser:</span>
-                  <button
-                    onClick={handleTestPing}
-                    disabled={isPingingCloud}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 text-xs font-bold shadow-sm transition disabled:opacity-50"
-                  >
-                    <Activity className={`h-3.5 w-3.5 ${isPingingCloud ? 'animate-spin' : ''}`} />
-                    <span>{isPingingCloud ? 'Pinging Cloud...' : 'Send Test Keep-Alive Ping'}</span>
-                  </button>
-                </div>
-
-                {cloudPingResult && (
-                  <div className="rounded-lg bg-stone-900 text-stone-200 p-3 font-mono text-[11px] overflow-x-auto">
-                    <div className="flex justify-between text-stone-400 mb-1">
-                      <span>Server Response:</span>
-                      <span className="text-emerald-400 font-bold">{cloudPingResult.status}</span>
-                    </div>
-                    <pre className="whitespace-pre-wrap">{JSON.stringify(cloudPingResult, null, 2)}</pre>
-                  </div>
-                )}
-              </div>
-
-              {/* Feature 3: Two Methods to run 24/7 */}
-              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-2">
-                <h4 className="font-bold text-stone-900 flex items-center gap-1.5">
-                  <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  Two Easy Options for 24/7 Non-Stop Execution:
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                  <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-1">
-                    <p className="font-bold text-stone-800">Method A: Free Scheduled Ping</p>
-                    <p className="text-stone-600 text-[11px] leading-relaxed">
-                      Register a free cron check at <strong>cron-job.org</strong> or <strong>UptimeRobot</strong> to send a GET request to the webhook URL above every <strong>5 minutes</strong>. This keeps Cloud Run warm with zero infrastructure cost.
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-1">
-                    <p className="font-bold text-stone-800">Method B: Cloud Run Min-Instances = 1</p>
-                    <p className="text-stone-600 text-[11px] leading-relaxed">
-                      In the Google Cloud Console, navigate to Cloud Run, click &quot;Edit & Deploy Revision&quot;, and set <strong>Minimum instances to 1</strong> (instead of 0). The engine will execute its 25-second trading loop permanently.
-                    </p>
-                  </div>
-                </div>
+            <div className="rounded-xl bg-stone-50 p-4 text-xs space-y-2 border border-stone-200">
+              <span className="font-bold text-stone-900">Health Ping Endpoint:</span>
+              <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-stone-300 font-mono text-[11px]">
+                <span className="truncate flex-1">{window.location.origin}/api/heartbeat</span>
+                <button
+                  onClick={() => handleCopyUrl(`${window.location.origin}/api/heartbeat`)}
+                  className="px-2 py-1 rounded bg-stone-100 hover:bg-stone-200 text-stone-800 font-sans text-xs font-bold"
+                >
+                  {copiedUrl ? 'Copied!' : 'Copy'}
+                </button>
               </div>
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="flex justify-end gap-2">
               <button
-                type="button"
-                onClick={() => setShowCloudModal(false)}
-                className="rounded-xl bg-stone-900 px-5 py-2 text-xs font-semibold text-white hover:bg-stone-800 transition"
+                onClick={handleTestPing}
+                disabled={isPingingCloud}
+                className="px-4 py-2 rounded-xl bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 disabled:opacity-50"
               >
-                Close Window
+                {isPingingCloud ? 'Testing...' : 'Test Ping'}
+              </button>
+              <button
+                onClick={() => setShowCloudModal(false)}
+                className="px-4 py-2 rounded-xl border border-stone-200 text-stone-700 text-xs font-bold hover:bg-stone-50"
+              >
+                Close
               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

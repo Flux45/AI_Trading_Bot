@@ -33,7 +33,6 @@ import type {
 } from '../types';
 import { MarketSentimentDial } from './MarketSentimentDial';
 import { MarketSentimentTrendChart } from './MarketSentimentTrendChart';
-import { ActiveTradesLivePnl } from './ActiveTradesLivePnl';
 
 interface NewsBasedRecommendationsProps {
   systemConfig: SystemConfig;
@@ -296,16 +295,6 @@ export const NewsBasedRecommendations: React.FC<NewsBasedRecommendationsProps> =
           )}
         </div>
       </div>
-
-      {/* Active Trades Live Profit/Loss Bar (if any open positions exist) */}
-      {positions && positions.length > 0 && (
-        <ActiveTradesLivePnl
-          positions={positions}
-          onClosePosition={onClosePosition}
-          onViewPortfolio={onViewPortfolio}
-          compact={true}
-        />
-      )}
 
       {/* 2. Market Sentiment Dial & Executive Intelligence Overview */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-stretch">

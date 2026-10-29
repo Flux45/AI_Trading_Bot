@@ -1,6 +1,7 @@
 export type BiasType = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 export type ActionType = 'BUY' | 'SELL';
 export type ProductType = 'CNC' | 'MIS';
+export type TradingHorizonMode = 'SWING' | 'INTRADAY';
 
 export interface SystemConfig {
   credentials: {
@@ -21,6 +22,49 @@ export interface SystemConfig {
     maxRiskPerTradePct: number; // e.g. 0.01 (1%)
     maxPositionConcentration: number; // e.g. 0.20 (20%)
     defaultProductType: ProductType;
+    tradingMode?: TradingHorizonMode;
+  };
+  weeklyReportSchedule?: WeeklyReportScheduleConfig;
+}
+
+export interface WeeklyReportScheduleConfig {
+  enabled: boolean;
+  recipientEmail: string;
+  dayOfWeek: 'FRIDAY' | 'SATURDAY' | 'SUNDAY' | 'MONDAY';
+  timeOfDay: string; // e.g. "15:30"
+  timeZone: string; // e.g. "Asia/Kolkata"
+  includeStrategies: boolean;
+  includePnlSnapshots: boolean;
+  includeOpenPositions: boolean;
+  includeClosedTrades: boolean;
+  includeLessons: boolean;
+  lastSentAt?: string;
+  lastStatus?: 'SUCCESS' | 'FAILED' | 'IDLE';
+  lastStatusMessage?: string;
+  lastPreviewUrl?: string;
+  nextScheduledAt?: string;
+}
+
+export interface DispatchHistoryRecord {
+  id: string;
+  timestamp: string;
+  recipient: string;
+  status: 'SUCCESS' | 'FAILED';
+  subject: string;
+  pdfSizeBytes: number;
+  pdfFilename: string;
+  messageId?: string;
+  previewUrl?: string;
+  isTestRun: boolean;
+  summary: {
+    totalEquity: number;
+    liquidCash: number;
+    unrealizedPnl: number;
+    realizedPnl: number;
+    activePositionsCount: number;
+    closedTradesCount: number;
+    topStrategyName: string;
+    topStrategyReturnPct: number;
   };
 }
 
@@ -31,6 +75,18 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  vwap?: number;
+  time?: string;
+}
+
+export interface PriceVerification {
+  is_verified: boolean;
+  yahoo_price: number;
+  tradingview_price: number;
+  difference_pct: number;
+  source: string;
+  verified_at: string;
+  status: 'EXACT_MATCH' | 'VERIFIED' | 'SYNCHRONIZED';
 }
 
 export interface MarketContext {
@@ -48,6 +104,16 @@ export interface MarketContext {
   return_margin_pct?: number;
   approx_days_to_target?: number;
   approx_time_label?: string;
+  timeframe?: 'INTRADAY_5M' | 'INTRADAY_15M' | 'INTRADAY_1M' | 'DAILY';
+  intraday_open?: number;
+  intraday_high?: number;
+  intraday_low?: number;
+  vwap?: number;
+  orb_high?: number;
+  orb_low?: number;
+  yahoo_live_price?: number;
+  tradingview_price?: number;
+  price_verification?: PriceVerification;
 }
 
 export interface TradeHypothesis {
@@ -139,11 +205,22 @@ export interface ExecutedPosition {
   unrealized_pnl?: number;
   unrealized_pnl_pct?: number;
   status: 'OPEN' | 'CLOSED';
+  breached_stop_ticks?: number;
+  breached_target_ticks?: number;
+  strategy_id?: string;
+  strategy_name?: string;
+  market_scenario_rationale?: string;
+  entry_time?: string;
+  trade_mode?: 'INTRADAY' | 'LONG';
+  product_type?: 'MIS' | 'CNC';
+  holding_duration?: string;
 }
 
 export interface TradeHistoryRecord {
   id: number;
+  order_id?: string;
   ticker: string;
+  company_name?: string;
   bias: BiasType;
   action: ActionType;
   shares: number;
@@ -153,6 +230,35 @@ export interface TradeHistoryRecord {
   pnl_pct: number;
   lesson: string;
   timestamp: string;
+  entry_time?: string;
+  exit_time?: string;
+  duration?: string;
+  duration_ms?: number;
+  exit_reason?: string;
+  trade_mode?: 'INTRADAY' | 'LONG';
+  product_type?: 'MIS' | 'CNC';
+  execution_mode?: string;
+  strategy_id?: string;
+  strategy_name?: string;
+  gain_loss_diagnosis?: string;
+}
+
+export interface StrategyPerformanceSummary {
+  strategy_id: string;
+  strategy_name: string;
+  trade_mode: 'INTRADAY' | 'LONG';
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate_pct: number;
+  net_pnl_rupees: number;
+  avg_pnl_pct: number;
+  avg_duration: string;
+  best_trade_pnl: number;
+  worst_trade_pnl: number;
+  verdict: 'HIGH_PERFORMER' | 'MODERATE' | 'UNDERPERFORMING';
+  verdict_label: string;
+  recommendation: string;
 }
 
 export interface PipelineStep {
@@ -270,6 +376,10 @@ export interface TransactionRecord {
   execution_mode: 'PAPER' | 'ZERODHA';
   status: 'FILLED' | 'CLOSED' | 'CANCELLED';
   notes?: string;
+  strategy_id?: string;
+  strategy_name?: string;
+  product_type?: 'MIS' | 'CNC';
+  trade_mode?: 'INTRADAY' | 'LONG';
 }
 
 export interface StockUniverseItem {
@@ -570,6 +680,7 @@ export interface AdaptiveTradingModel {
     minRiskReward: number; // e.g. 2.5:1
     maxRiskPerTradeRupees: number; // e.g. ₹500
     maxOpenPositions: number; // e.g. 4
+    maxPositionsPerSector?: number; // e.g. 1 (strict sector diversification)
     kellyFractionMultiplier: number;
   };
   recentAdaptations: LearnedAdaptation[];
@@ -625,5 +736,311 @@ export interface PortfolioAccounting {
   activePositionsCount: number;
 }
 
+export interface HeartbeatRecord {
+  id?: number;
+  timestamp: string;
+  source: string;
+  ip?: string;
+  user_agent?: string;
+  duration_ms?: number;
+  status_code?: number;
+  active_positions_count?: number;
+  memory_mb?: number;
+  notes?: string;
+}
 
+export interface HeartbeatTelemetry {
+  success: boolean;
+  status: string;
+  uptime_seconds: number;
+  boot_time: string;
+  active_positions_count: number;
+  autonomous_daemon: {
+    isRunning: boolean;
+    cycleCount: number;
+    lastTickAt?: string;
+  };
+  stats: {
+    totalPings: number;
+    lastPing: HeartbeatRecord | null;
+    pingsLast24Hours: number;
+    cronJobOrgPings: number;
+    avgDurationMs: number;
+  };
+  recent_pings: HeartbeatRecord[];
+  cronjob_api_key_configured: boolean;
+  suggested_endpoints: {
+    production: string;
+    development: string;
+    current_request: string;
+  };
+  server_time: {
+    utc: string;
+    ist: string;
+  };
+}
 
+// ==========================================
+// ALGO RESEARCH BOT & SANDBOX LAB TYPES
+// ==========================================
+
+export type AlgoStrategyCategory =
+  | 'MOMENTUM_BREAKOUT'
+  | 'MEAN_REVERSION_PAIRS'
+  | 'VOLATILITY_EXPANSION'
+  | 'ORDER_FLOW_MICROSTRUCTURE'
+  | 'AI_ML_REGIME'
+  | 'INTRADAY_QUANT'
+  | 'INTRADAY_MOMENTUM'
+  | 'INTRADAY_HFT';
+
+export interface DiscoveredAlgoStrategy {
+  id: string;
+  name: string;
+  category: AlgoStrategyCategory;
+  categoryLabel: string;
+  author_or_source: string;
+  source_url: string;
+  discovered_at: string;
+  description: string;
+  mathematical_formula: string;
+  logic_summary: {
+    entry_rule: string;
+    exit_rule: string;
+    stop_loss_rule: string;
+    position_sizing: string;
+  };
+  code_snippet: string;
+  default_parameters: Record<string, number | string>;
+  target_universe: string;
+  credibility_rating: 'A+' | 'A' | 'B+' | 'B' | 'C';
+  overfitting_risk_score: number; // 0-100 (lower is better, e.g. 12 = low risk)
+  market_regime_suitability: {
+    bull: 'EXCELLENT' | 'MODERATE' | 'POOR';
+    bear: 'EXCELLENT' | 'MODERATE' | 'POOR';
+    sideways_choppy: 'EXCELLENT' | 'MODERATE' | 'POOR';
+  };
+  audited_metrics: {
+    annualized_return_pct: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    max_drawdown_pct: number;
+    calmar_ratio: number;
+    win_rate_pct: number;
+    profit_factor: number;
+    total_simulated_trades: number;
+    avg_trade_duration_days: number;
+  };
+  is_approved_for_paper: boolean;
+  deployment_config?: {
+    approved_at: string;
+    max_capital_allocation: number;
+    hard_stop_loss_pct: number;
+    auto_paper_execution: boolean;
+    status: 'ACTIVE_PAPER' | 'QUEUED' | 'PAUSED';
+  };
+}
+
+export interface BacktestSimulationRequest {
+  strategy_id: string;
+  time_horizon: '30D' | '90D' | '180D' | '1Y';
+  initial_capital: number;
+  slippage_pct?: number; // default 0.05
+  stt_and_fees?: boolean; // default true
+  selected_tickers?: string[];
+}
+
+export interface BacktestTradeLog {
+  id: string;
+  date: string;
+  ticker: string;
+  action: 'BUY' | 'SELL';
+  entry_price: number;
+  exit_price: number;
+  shares: number;
+  pnl: number;
+  pnl_pct: number;
+  reason: string;
+}
+
+export interface BacktestEquityPoint {
+  day: number;
+  date: string;
+  strategy_equity: number;
+  baseline_equity: number;
+  benchmark_nifty_equity: number;
+  drawdown_pct: number;
+}
+
+export interface BacktestSimulationResult {
+  run_id: string;
+  strategy_id: string;
+  strategy_name: string;
+  timestamp: string;
+  time_horizon: string;
+  initial_capital: number;
+  final_equity: number;
+  net_pnl: number;
+  total_return_pct: number;
+  baseline_comparison: {
+    baseline_name: string;
+    baseline_return_pct: number;
+    baseline_sharpe: number;
+    baseline_max_drawdown_pct: number;
+    alpha_generated_pct: number;
+  };
+  performance: {
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    calmar_ratio: number;
+    max_drawdown_pct: number;
+    win_rate_pct: number;
+    profit_factor: number;
+    total_trades: number;
+    winning_trades: number;
+    losing_trades: number;
+    avg_win_rupees: number;
+    avg_loss_rupees: number;
+    largest_win_rupees: number;
+    largest_loss_rupees: number;
+    total_brokerage_and_taxes_inr: number;
+  };
+  regime_breakdown: {
+    bull_days_return_pct: number;
+    bear_days_return_pct: number;
+    choppy_days_return_pct: number;
+  };
+  equity_curve: BacktestEquityPoint[];
+  trade_log: BacktestTradeLog[];
+}
+
+export interface AlgoDiscoverySweepStatus {
+  is_searching: boolean;
+  last_sweep_time: string;
+  total_strategies_discovered: number;
+  sources_crawled: string[];
+  categories_covered: string[];
+}
+
+export interface StrategyActiveHolding {
+  ticker: string;
+  company_name: string;
+  shares: number;
+  entry_fill_price: number;
+  current_price: number;
+  stop_loss: number;
+  target_price: number;
+  capital_allocated: number;
+  rupee_risk: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+  execution_timestamp: string;
+  market_scenario_rationale: string;
+  risk_reward_ratio: number;
+}
+
+export interface StrategyLedger {
+  strategy_id: string;
+  strategy_name: string;
+  category: AlgoStrategyCategory;
+  categoryLabel: string;
+  initial_capital: number; // ₹25,000 isolated paper capital
+  liquid_cash: number;
+  invested_capital: number;
+  total_equity: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  net_return_rupees: number;
+  net_return_pct: number;
+  win_rate_pct: number;
+  profit_factor: number;
+  sharpe_ratio: number;
+  max_drawdown_pct: number;
+  trade_count: number;
+  winning_trades: number;
+  losing_trades: number;
+  is_active_24_7: boolean;
+  status: 'ACTIVE_PAPER' | 'PAUSED' | 'BENCHMARK_FLAGSHIP';
+  last_evaluated_at: string;
+  last_action_summary: string;
+  active_holdings: StrategyActiveHolding[];
+  closed_trades: TradeHistoryRecord[];
+  equity_curve?: { timestamp: string; equity: number; cash: number }[];
+}
+
+export interface StrategyLeaderboardEntry {
+  rank: number;
+  strategy_id: string;
+  strategy_name: string;
+  category: AlgoStrategyCategory;
+  categoryLabel: string;
+  status: 'ACTIVE_PAPER' | 'PAUSED' | 'BENCHMARK_FLAGSHIP';
+  is_flagship?: boolean;
+  is_ensemble?: boolean;
+  allocated_capital: number;
+  total_equity: number;
+  net_return_rupees: number;
+  net_return_pct: number;
+  win_rate_pct: number;
+  profit_factor: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  max_drawdown_pct: number;
+  trade_count: number;
+  active_positions_count: number;
+  last_evaluated_at: string;
+}
+
+export interface TitanBibliographyItem {
+  title: string;
+  role: 'Author' | 'Co-Author' | 'Annual Letters' | 'Articles & Essays' | 'Whitepaper & Speeches';
+  year: string;
+  significance: string;
+  url?: string;
+}
+
+export interface TitanWritingItem {
+  title: string;
+  publication_or_source: string;
+  date_or_edition: string;
+  summary_takeaway: string;
+  url?: string;
+}
+
+export interface TitanLiveSignal {
+  ticker: string;
+  company_name: string;
+  current_price: number;
+  signal: 'STRONG_BUY' | 'ACCUMULATE' | 'WATCH_PIVOT';
+  conviction_score: number;
+  primary_metric: string;
+  intrinsic_or_pivot_level: number;
+  stop_loss: number;
+  target_price: number;
+  catalyst_or_rationale: string;
+}
+
+export interface TitanMaster {
+  id: string;
+  name: string;
+  title: string;
+  firm_or_era: string;
+  avatar_initials: string;
+  accent_color: string;
+  cagr_or_track_record: string;
+  core_philosophy: string;
+  key_quote: string;
+  bibliography: TitanBibliographyItem[];
+  articles_and_letters: TitanWritingItem[];
+  mathematical_strategy: {
+    formula_or_model: string;
+    screening_criteria: string[];
+    entry_trigger: string;
+    stop_loss_discipline: string;
+    profit_target_rule: string;
+    position_sizing_rule: string;
+  };
+  target_universe: string;
+  live_signals: TitanLiveSignal[];
+  sub_ledger: StrategyLedger;
+}

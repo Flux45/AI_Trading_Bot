@@ -18,11 +18,13 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  Database,
 } from 'lucide-react';
-import type { ExecutedPosition } from '../types';
+import type { ExecutedPosition, TradeHistoryRecord } from '../types';
 
 interface ActiveTradesLivePnlProps {
   positions: ExecutedPosition[];
+  tradeHistory?: TradeHistoryRecord[];
   onClosePosition?: (orderId: string, exitPrice: number) => Promise<void>;
   onViewPortfolio?: () => void;
   onViewTransactions?: () => void;
@@ -30,19 +32,23 @@ interface ActiveTradesLivePnlProps {
   onOpenAlertSettings?: () => void;
   alertThresholds?: { profitPct: number; lossPct: number };
   defaultExpanded?: boolean;
+  onSelectStrategy?: (strategyIdOrName: string) => void;
 }
 
 export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
   positions,
+  tradeHistory = [],
   onClosePosition,
   onViewPortfolio,
   onViewTransactions,
   compact = false,
   onOpenAlertSettings,
   alertThresholds,
-  defaultExpanded = false,
+  defaultExpanded = true,
+  onSelectStrategy,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [tradeViewFilter, setTradeViewFilter] = useState<'ALL' | 'LIVE' | 'ENDED'>('ALL');
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [exitPriceInput, setExitPriceInput] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,7 +81,7 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
     }
   };
 
-  if (positions.length === 0) {
+  if (positions.length === 0 && tradeHistory.length === 0) {
     return null;
   }
 
@@ -84,20 +90,23 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
     return (
       <div
         id="active-trades-compact-bar"
-        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-3.5 shadow-xs"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-blue-500 bg-blue-50/20 p-3.5 shadow-xs"
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
             <Layers className="h-4 w-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-stone-900">
-                Active Trades ({positions.length})
+                Active Trades ({positions.length} Live &bull; {tradeHistory.length} Ended)
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live MTM
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                LIVE IN BLUE BOX
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-bold text-stone-950 border border-yellow-500">
+                ENDED IN YELLOW BOX
               </span>
             </div>
             <p className="text-[11px] text-stone-500">
@@ -168,26 +177,30 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
   return (
     <div
       id="active-trades-dropdown-panel"
-      className="rounded-2xl border border-stone-200/90 bg-white shadow-xs transition-all duration-200 overflow-hidden"
+      className="rounded-2xl border border-stone-200/90 dark:border-stone-800 bg-white dark:bg-[#12141c] shadow-xs transition-all duration-200 overflow-hidden"
     >
       {/* Sleek Collapsible Header Bar */}
       <div
-        className="flex flex-wrap items-center justify-between gap-3.5 px-4 py-3 bg-stone-50/60 hover:bg-stone-50/90 transition cursor-pointer select-none"
+        className="flex flex-wrap items-center justify-between gap-3.5 px-4 py-3 bg-stone-50/60 dark:bg-stone-900/50 hover:bg-stone-50/90 dark:hover:bg-stone-900/80 transition cursor-pointer select-none"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {/* Left: Indicator & Count & Quick Ticker Tags */}
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100/80 text-blue-700 shadow-2xs">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white shadow-2xs">
             <Briefcase className="h-4 w-4" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs sm:text-sm font-bold text-stone-900">
-                Active Trades &amp; Live P&amp;L
+              <span className="text-xs sm:text-sm font-bold text-stone-900 dark:text-white">
+                Active Trades &amp; Ended Trades Monitor
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200/80">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                {positions.length} Open Position{positions.length === 1 ? '' : 's'}
+              <span className="inline-flex items-center gap-1 rounded-md border-2 border-blue-500 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 text-[10px] font-extrabold text-blue-700 dark:text-blue-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-pulse" />
+                {positions.length} LIVE (Blue Box)
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md border-2 border-yellow-400 bg-yellow-50 dark:bg-yellow-950/50 px-2 py-0.5 text-[10px] font-extrabold text-yellow-800 dark:text-yellow-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
+                {tradeHistory.length} ENDED (Yellow Line Box)
               </span>
 
               {/* Quick ticker preview pills */}
@@ -200,23 +213,23 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
                   return (
                     <span
                       key={pos.order_id}
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold border ${
-                        isPosProfit
-                          ? 'bg-emerald-50/80 text-emerald-700 border-emerald-200/60'
-                          : 'bg-rose-50/80 text-rose-700 border-rose-200/60'
-                      }`}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold border-2 border-blue-500 bg-blue-50/90 text-blue-900"
+                      title="Live Active Trade (Blue Boundary Box)"
                     >
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-pulse" />
                       <span>{pos.ticker}</span>
-                      <span>{isPosProfit ? '+' : ''}{pct.toFixed(1)}%</span>
+                      <span className={isPosProfit ? 'text-emerald-700' : 'text-rose-700'}>
+                        {isPosProfit ? '+' : ''}{pct.toFixed(1)}%
+                      </span>
                     </span>
                   );
                 })}
               </div>
             </div>
-            <p className="text-[11px] text-stone-500 hidden sm:block">
-              Exposure: <span className="font-mono font-medium text-stone-700">₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400 hidden sm:block">
+              Live Exposure: <span className="font-mono font-medium text-stone-700 dark:text-stone-200">₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
               <span className="mx-1.5 text-stone-300">&bull;</span>
-              Current Value: <span className="font-mono font-medium text-stone-700">₹{totalCurrentValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              Current Value: <span className="font-mono font-medium text-stone-700 dark:text-stone-200">₹{totalCurrentValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
             </p>
           </div>
         </div>
@@ -282,7 +295,7 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
             }`}
             aria-expanded={isExpanded}
           >
-            <span>{isExpanded ? 'Hide Details' : `View Details (${positions.length})`}</span>
+            <span>{isExpanded ? 'Hide Trades' : `Show Trades (${positions.length} Live / ${tradeHistory.length} Ended)`}</span>
             {isExpanded ? (
               <ChevronUp className="h-3.5 w-3.5 text-stone-300" />
             ) : (
@@ -294,15 +307,58 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
 
       {/* DROPDOWN EXPANDED DRAWER CONTENT */}
       {isExpanded && (
-        <div className="border-t border-stone-200/80 p-4 sm:p-5 bg-white space-y-4 animate-in fade-in slide-in-from-top-1 duration-150">
-          {/* Quick Navigation Action Header */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-stone-500 font-medium">Quick inspection:</span>
-              <span className="font-mono text-stone-700 font-semibold">{positions.length} active positions in algorithmic execution</span>
+        <div className="border-t border-stone-200/80 dark:border-stone-800 p-4 sm:p-5 bg-white dark:bg-[#12141c] space-y-4 animate-in fade-in slide-in-from-top-1 duration-150">
+          {/* Legend & Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100 dark:border-stone-800 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-1.5 rounded-lg border-2 border-blue-500 bg-blue-50/80 dark:bg-blue-950/40 px-2.5 py-1 text-[11px] font-extrabold text-blue-800 dark:text-blue-200">
+                <span className="h-2 w-2 rounded-full bg-blue-600 animate-ping" />
+                <span>Blue Boundary Box = LIVE TRADE ({positions.length})</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-lg border-2 border-yellow-400 bg-yellow-50/90 dark:bg-yellow-950/40 px-2.5 py-1 text-[11px] font-extrabold text-yellow-900 dark:text-yellow-200">
+                <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                <span>Yellow Line Box = ENDED TRADE ({tradeHistory.length})</span>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Filter Tabs */}
+              <div className="inline-flex rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-900 p-0.5 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setTradeViewFilter('ALL')}
+                  className={`rounded-md px-2.5 py-1 transition ${
+                    tradeViewFilter === 'ALL'
+                      ? 'bg-stone-900 text-white shadow-2xs'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                >
+                  All ({positions.length + tradeHistory.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTradeViewFilter('LIVE')}
+                  className={`rounded-md px-2.5 py-1 transition ${
+                    tradeViewFilter === 'LIVE'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'text-blue-700 dark:text-blue-400 hover:bg-blue-50'
+                  }`}
+                >
+                  🔵 Live ({positions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTradeViewFilter('ENDED')}
+                  className={`rounded-md px-2.5 py-1 transition ${
+                    tradeViewFilter === 'ENDED'
+                      ? 'bg-yellow-400 text-stone-950 shadow-2xs'
+                      : 'text-yellow-800 dark:text-yellow-400 hover:bg-yellow-50'
+                  }`}
+                >
+                  🟡 Ended ({tradeHistory.length})
+                </button>
+              </div>
+
               {onViewPortfolio && (
                 <button
                   type="button"
@@ -310,7 +366,7 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition shadow-2xs"
                   title="Open Paper Portfolio tab with full details"
                 >
-                  <span>Full Details in Paper Portfolio</span>
+                  <span>Paper Portfolio</span>
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -322,151 +378,299 @@ export const ActiveTradesLivePnl: React.FC<ActiveTradesLivePnlProps> = ({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition shadow-2xs"
                   title="Open Transaction History tab with active trades ledger"
                 >
-                  <span>Full Details in Transaction History</span>
+                  <span>Transaction History</span>
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
           </div>
 
-          {/* Individual Position Cards in Dropdown */}
-          <div className="grid grid-cols-1 gap-3">
-            {positions.map((pos) => {
-              const currentPrice = pos.current_price || pos.fill_price;
-              const pnl =
-                pos.action === 'BUY'
-                  ? (currentPrice - pos.fill_price) * pos.shares
-                  : (pos.fill_price - currentPrice) * pos.shares;
-              const pnlPct = (pnl / (pos.fill_price * pos.shares)) * 100;
-              const isProfit = pnl >= 0;
+          {/* LIVE TRADES IN BLUE BOUNDARY BOXES */}
+          {(tradeViewFilter === 'ALL' || tradeViewFilter === 'LIVE') && positions.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
+                  Live Active Trades — Blue Boundary Boxes ({positions.length})
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                {positions.map((pos) => {
+                  const currentPrice = pos.current_price || pos.fill_price;
+                  const pnl =
+                    pos.action === 'BUY'
+                      ? (currentPrice - pos.fill_price) * pos.shares
+                      : (pos.fill_price - currentPrice) * pos.shares;
+                  const pnlPct = (pnl / (pos.fill_price * pos.shares)) * 100;
+                  const isProfit = pnl >= 0;
 
-              // Target progression calculation
-              const targetDistance = Math.abs(pos.target_price - pos.fill_price) || 1;
-              const currentGain = currentPrice - pos.fill_price;
-              const targetProgress = Math.max(0, Math.min(100, (currentGain / targetDistance) * 100));
+                  // Target progression calculation
+                  const targetDistance = Math.abs(pos.target_price - pos.fill_price) || 1;
+                  const currentGain = currentPrice - pos.fill_price;
+                  const targetProgress = Math.max(0, Math.min(100, (currentGain / targetDistance) * 100));
 
-              return (
-                <div
-                  key={pos.order_id}
-                  className="rounded-xl border border-stone-200 bg-stone-50/40 p-3.5 shadow-2xs hover:border-stone-300 transition"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    {/* Left: Ticker & Status */}
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`rounded-lg px-2.5 py-1 text-xs font-black tracking-wider uppercase shrink-0 ${
-                          pos.action === 'BUY'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-rose-100 text-rose-800'
-                        }`}
-                      >
-                        {pos.action}
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm font-extrabold text-stone-900">{pos.ticker}</h4>
-                          <span className="font-mono text-xs font-semibold text-stone-600">
-                            {pos.shares} Shares
-                          </span>
-                          <span className="rounded bg-stone-200/70 px-1.5 py-0.5 font-mono text-[10px] text-stone-600">
-                            {pos.order_id}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
-                          <span>
-                            Fill: <strong className="font-mono text-stone-700">₹{pos.fill_price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
-                          </span>
-                          <span>&bull;</span>
-                          <span>
-                            CMP: <strong className="font-mono text-stone-900 font-bold">₹{currentPrice.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
-                          </span>
-                          <span>&bull;</span>
-                          <span>
-                            Capital: <strong className="font-mono text-stone-700">₹{(pos.fill_price * pos.shares).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong>
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Center: Boundaries (Stop Loss & Target) */}
-                    <div className="flex items-center gap-2.5 text-xs">
-                      <div className="rounded-lg border border-rose-200/80 bg-rose-50/80 px-2.5 py-1">
-                        <span className="text-[9px] font-bold uppercase text-rose-500 block">Stop Loss</span>
-                        <p className="font-mono font-bold text-rose-700">₹{pos.stop_loss}</p>
-                      </div>
-
-                      <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1">
-                        <span className="text-[9px] font-bold uppercase text-emerald-500 block">Target</span>
-                        <p className="font-mono font-bold text-emerald-700">₹{pos.target_price}</p>
-                      </div>
-                    </div>
-
-                    {/* Right: Current Profit or Loss Badge & Action */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3">
-                      <div className="text-right">
-                        <span className="text-[9px] uppercase font-bold tracking-wider text-stone-400 block">
-                          Current MTM
+                  return (
+                    <div
+                      key={pos.order_id}
+                      className="rounded-xl border-2 border-blue-500 dark:border-blue-400 bg-blue-50/30 dark:bg-blue-950/25 p-3.5 shadow-sm ring-2 ring-blue-500/15 hover:border-blue-600 transition"
+                    >
+                      {/* Blue Live Trade Banner */}
+                      <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/70 pb-2 mb-2.5">
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-2xs">
+                          <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                          LIVE TRADE &bull; ACTIVE IN MARKET
                         </span>
-                        <div className="flex items-center justify-end gap-1.5">
+                        <span className="font-mono text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                          Order #{pos.order_id} &bull; Real-Time MTM
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        {/* Left: Ticker & Status */}
+                        <div className="flex items-center gap-3">
                           <span
-                            className={`font-mono text-sm sm:text-base font-black ${
-                              isProfit ? 'text-emerald-600' : 'text-rose-600'
-                            }`}
-                          >
-                            {isProfit ? '+' : ''}₹
-                            {pnl.toLocaleString('en-IN', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </span>
-                          <span
-                            className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-bold ${
-                              isProfit
+                            className={`rounded-lg px-2.5 py-1 text-xs font-black tracking-wider uppercase shrink-0 ${
+                              pos.action === 'BUY'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : 'bg-rose-100 text-rose-800'
                             }`}
                           >
-                            {isProfit ? '+' : ''}
-                            {pnlPct.toFixed(2)}%
+                            {pos.action}
                           </span>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-sm font-extrabold text-stone-900 dark:text-white">{pos.ticker}</h4>
+                              <span className="font-mono text-xs font-semibold text-stone-600 dark:text-stone-300">
+                                {pos.shares} Shares
+                              </span>
+                              {pos.strategy_name && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectStrategy?.(pos.strategy_id || pos.strategy_name)}
+                                  className="rounded-md bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 px-2 py-0.5 text-[10px] font-bold transition cursor-pointer flex items-center gap-1"
+                                  title={`Click to inspect all trades & return for ${pos.strategy_name}`}
+                                >
+                                  <span>🔍 Strategy: {pos.strategy_name}</span>
+                                </button>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-600 dark:text-stone-300">
+                              <span>
+                                Fill: <strong className="font-mono text-stone-800 dark:text-white">₹{pos.fill_price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                              </span>
+                              <span>&bull;</span>
+                              <span>
+                                Live CMP: <strong className="font-mono text-blue-700 dark:text-blue-300 font-bold">₹{currentPrice.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                              </span>
+                              <span>&bull;</span>
+                              <span>
+                                Capital: <strong className="font-mono text-stone-800 dark:text-white">₹{(pos.fill_price * pos.shares).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong>
+                              </span>
+                              <span>&bull;</span>
+                              <span className="text-blue-800 dark:text-blue-300 font-semibold">
+                                🕒 {new Date(pos.entry_time || pos.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} IST
+                              </span>
+                              {pos.holding_duration && (
+                                <>
+                                  <span>&bull;</span>
+                                  <span className="font-mono font-bold text-stone-700 dark:text-stone-200">
+                                    ⏱️ {pos.holding_duration}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Center: Boundaries (Stop Loss & Target) */}
+                        <div className="flex items-center gap-2.5 text-xs">
+                          <div className="rounded-lg border border-rose-200/80 bg-rose-50/80 px-2.5 py-1">
+                            <span className="text-[9px] font-bold uppercase text-rose-500 block">Stop Loss</span>
+                            <p className="font-mono font-bold text-rose-700">₹{pos.stop_loss}</p>
+                          </div>
+
+                          <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1">
+                            <span className="text-[9px] font-bold uppercase text-emerald-500 block">Target</span>
+                            <p className="font-mono font-bold text-emerald-700">₹{pos.target_price}</p>
+                          </div>
+                        </div>
+
+                        {/* Right: Current Profit or Loss Badge & Action */}
+                        <div className="flex items-center justify-between sm:justify-end gap-3">
+                          <div className="text-right">
+                            <span className="text-[9px] uppercase font-bold tracking-wider text-blue-600 dark:text-blue-400 block">
+                              Live Floating MTM
+                            </span>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span
+                                className={`font-mono text-sm sm:text-base font-black ${
+                                  isProfit ? 'text-emerald-600' : 'text-rose-600'
+                                }`}
+                              >
+                                {isProfit ? '+' : ''}₹
+                                {pnl.toLocaleString('en-IN', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                              <span
+                                className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-bold ${
+                                  isProfit
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                }`}
+                              >
+                                {isProfit ? '+' : ''}
+                                {pnlPct.toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          {onClosePosition && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenClose(pos)}
+                              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition shadow-2xs whitespace-nowrap"
+                            >
+                              Close Trade
+                            </button>
+                          )}
                         </div>
                       </div>
 
-                      {onClosePosition && (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenClose(pos)}
-                          className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 transition shadow-2xs whitespace-nowrap"
-                        >
-                          Close Trade
-                        </button>
-                      )}
+                      {/* Target Progression Progress Bar */}
+                      <div className="mt-2.5 border-t border-blue-200/80 dark:border-blue-800/60 pt-2">
+                        <div className="flex items-center justify-between text-[10px] text-stone-600 dark:text-stone-400 mb-1">
+                          <span>
+                            Progression to Target: <strong className="font-mono">{targetProgress.toFixed(1)}%</strong>
+                          </span>
+                          <span>
+                            Rupee Risk: <strong className="font-mono text-rose-600">₹{pos.rupee_risk.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/50">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              isProfit ? 'bg-blue-600' : 'bg-rose-500'
+                            }`}
+                            style={{ width: `${Math.max(4, targetProgress)}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-                  {/* Target Progression Progress Bar */}
-                  <div className="mt-2.5 border-t border-stone-200/60 pt-2">
-                    <div className="flex items-center justify-between text-[10px] text-stone-500 mb-1">
-                      <span>
-                        Progression to Target: <strong className="font-mono">{targetProgress.toFixed(1)}%</strong>
-                      </span>
-                      <span>
-                        Rupee Risk: <strong className="font-mono text-rose-600">₹{pos.rupee_risk.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
-                      </span>
+          {/* ENDED TRADES IN BOXES WITH YELLOW LINES */}
+          {(tradeViewFilter === 'ALL' || tradeViewFilter === 'ENDED') && tradeHistory.length > 0 && (
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-yellow-700 dark:text-yellow-400 flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                  Ended Trades — Yellow Line Boxes ({tradeHistory.length})
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                {tradeHistory.slice(0, 6).map((trade, idx) => {
+                  const isProfit = trade.pnl_realized >= 0;
+                  return (
+                    <div
+                      key={`${trade.id}-${idx}`}
+                      className="rounded-xl border-2 border-yellow-400 dark:border-yellow-500 bg-yellow-50/40 dark:bg-yellow-950/20 p-3.5 shadow-sm ring-2 ring-yellow-400/20 hover:border-yellow-500 transition"
+                    >
+                      {/* Yellow Line Header Strip */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-dashed border-yellow-400 dark:border-yellow-500/70 pb-2 mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-md bg-yellow-400 text-stone-950 border border-yellow-500 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-2xs">
+                            <span>■ TRADE ENDED</span>
+                          </span>
+                          <span className="text-[11px] font-bold text-yellow-900 dark:text-yellow-300">
+                            {trade.exit_reason || (isProfit ? '🎯 Target Hit' : '🛡️ Stop Loss Executed')}
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] font-bold text-yellow-800 dark:text-yellow-300">
+                          Duration: {trade.duration || 'Completed'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`rounded-lg px-2.5 py-1 text-xs font-black tracking-wider uppercase shrink-0 ${
+                              trade.action === 'BUY'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {trade.action}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-sm font-extrabold text-stone-900 dark:text-white">{trade.ticker}</h4>
+                              <span className="font-mono text-xs font-semibold text-stone-600 dark:text-stone-300">
+                                {trade.shares} Shares
+                              </span>
+                              {trade.strategy_name && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectStrategy?.(trade.strategy_id || trade.strategy_name)}
+                                  className="rounded-md bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-800 dark:text-purple-300 border border-purple-200 px-2 py-0.5 text-[10px] font-bold transition cursor-pointer"
+                                >
+                                  🔍 Strategy: {trade.strategy_name}
+                                </button>
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-stone-600 dark:text-stone-300">
+                              <span>
+                                Entry Price: <strong className="font-mono text-stone-900 dark:text-white">₹{trade.entry_price.toFixed(2)}</strong>
+                              </span>
+                              <span>&rarr;</span>
+                              <span>
+                                Exit Price: <strong className="font-mono text-stone-900 dark:text-white">₹{trade.exit_price.toFixed(2)}</strong>
+                              </span>
+                              <span>&bull;</span>
+                              <span>
+                                Exited: <strong className="font-mono text-yellow-900 dark:text-yellow-300">
+                                  {new Date(trade.exit_time || trade.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} IST
+                                </strong>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[9px] uppercase font-bold tracking-wider text-yellow-800 dark:text-yellow-400 block">
+                            Settled Realized P&amp;L
+                          </span>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span
+                              className={`font-mono text-sm sm:text-base font-black ${
+                                isProfit ? 'text-emerald-600' : 'text-rose-600'
+                              }`}
+                            >
+                              {isProfit ? '+' : ''}₹{trade.pnl_realized.toFixed(2)}
+                            </span>
+                            <span
+                              className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-bold ${
+                                isProfit
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {isProfit ? '+' : ''}{trade.pnl_pct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          isProfit ? 'bg-emerald-500' : 'bg-rose-500'
-                        }`}
-                        style={{ width: `${Math.max(4, targetProgress)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Bottom collapse button */}
           <div className="flex justify-end pt-1">

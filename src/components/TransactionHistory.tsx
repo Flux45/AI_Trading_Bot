@@ -2,29 +2,15 @@ import React, { useState, useMemo } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  ArrowDownRight,
   Download,
-  Filter,
   Search,
   RefreshCw,
   ShieldCheck,
-  CheckCircle2,
-  Clock,
-  Briefcase,
-  Layers,
-  ArrowRight,
   TrendingUp,
-  TrendingDown,
-  Trash2,
-  Activity,
-  XCircle,
-  Target,
-  ShieldAlert,
-  Eye,
-  ChevronDown,
-  ChevronUp,
+  Database,
+  Zap,
 } from 'lucide-react';
-import type { TransactionRecord, ExecutedPosition, SystemConfig } from '../types';
+import type { TransactionRecord, ExecutedPosition, TradingHorizonMode } from '../types';
 
 interface TransactionHistoryProps {
   transactions: TransactionRecord[];
@@ -32,83 +18,72 @@ interface TransactionHistoryProps {
   onRefresh: () => Promise<void>;
   onClearLedger?: () => Promise<void>;
   onSelectTickerForPipeline?: (ticker: string) => void;
-  onClosePosition?: (orderId: string, exitPrice: number) => Promise<void>;
+  onClosePosition?: (orderId: string, exitPrice: number, exitReason?: string) => Promise<void>;
+  onOpenPdfReport?: () => void;
+  tradingMode?: TradingHorizonMode;
+  onTradingModeChange?: (mode: TradingHorizonMode) => void;
+  onSelectStrategy?: (strategyIdOrName: string) => void;
 }
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   transactions,
   openPositions = [],
   onRefresh,
-  onClearLedger,
   onSelectTickerForPipeline,
   onClosePosition,
+  onOpenPdfReport,
+  tradingMode = 'INTRADAY',
+  onTradingModeChange,
+  onSelectStrategy,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'ENTRIES' | 'EXITS'>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showActiveDetails, setShowActiveDetails] = useState(true);
-  const [closingPos, setClosingPos] = useState<ExecutedPosition | null>(null);
-  const [exitPriceInput, setExitPriceInput] = useState<string>('');
-  const [isSubmittingClose, setIsSubmittingClose] = useState(false);
 
-  const handleOpenCloseModal = (pos: ExecutedPosition) => {
-    setClosingPos(pos);
-    setExitPriceInput((pos.current_price || pos.fill_price).toString());
-  };
+  const isIntraday = tradingMode === 'INTRADAY';
 
-  const handleConfirmClose = async () => {
-    if (!closingPos || !onClosePosition) return;
-    const price = parseFloat(exitPriceInput);
-    if (isNaN(price) || price <= 0) return;
-    setIsSubmittingClose(true);
-    try {
-      await onClosePosition(closingPos.order_id, price);
-      setClosingPos(null);
-      await onRefresh();
-    } catch (err) {
-      console.error('Failed to close trade from transactions tab:', err);
-    } finally {
-      setIsSubmittingClose(false);
-    }
-  };
-
-  // Helper to resolve active trade details (from live openPositions prop or enriched txn)
-  const getActivePositionData = (txn: TransactionRecord) => {
-    let activePos: ExecutedPosition | undefined;
-    if (openPositions && openPositions.length > 0) {
-      activePos = openPositions.find((p) => p.order_id === txn.order_id);
-      if (!activePos && (txn.type === 'ENTRY_BUY' || txn.type === 'ENTRY_SELL')) {
-        activePos = openPositions.find((p) => p.ticker === txn.ticker);
+  // 100% Isolated active positions for the current horizon mode
+  const modePositions = useMemo(() => {
+    return (openPositions || []).filter((p) => {
+      if (isIntraday) {
+        return (
+          p.trade_mode === 'INTRADAY' ||
+          p.product_type === 'MIS' ||
+          (!p.trade_mode && p.product_type !== 'CNC')
+        );
       }
-    }
+      return (
+        p.trade_mode === 'LONG' ||
+        p.trade_mode === 'SWING' ||
+        p.product_type === 'CNC' ||
+        (!p.trade_mode && p.product_type !== 'MIS')
+      );
+    });
+  }, [openPositions, isIntraday]);
 
-    const isActive = txn.is_active || !!activePos;
-    const currentPrice = activePos?.current_price ?? txn.current_price ?? txn.price;
-
-    let currentPnl: number | undefined = activePos?.unrealized_pnl ?? txn.current_pnl;
-    let currentPnlPct: number | undefined = activePos?.unrealized_pnl_pct ?? txn.current_pnl_pct;
-
-    if (isActive && currentPnl === undefined) {
-      currentPnl =
-        txn.action === 'BUY'
-          ? (currentPrice - txn.price) * txn.shares
-          : (txn.price - currentPrice) * txn.shares;
-      currentPnlPct = ((currentPnl) / (txn.price * txn.shares)) * 100;
-    }
-
-    return {
-      isActive,
-      currentPrice,
-      currentPnl,
-      currentPnlPct,
-    };
-  };
-
-  // Filtered transactions
-  const filteredTransactions = useMemo(() => {
+  // 100% Isolated transactions for the current horizon mode
+  const modeTransactions = useMemo(() => {
     return transactions.filter((txn) => {
+      if (isIntraday) {
+        return (
+          txn.trade_mode === 'INTRADAY' ||
+          txn.product_type === 'MIS' ||
+          (!txn.trade_mode && txn.product_type !== 'CNC')
+        );
+      }
+      return (
+        txn.trade_mode === 'LONG' ||
+        txn.trade_mode === 'SWING' ||
+        txn.product_type === 'CNC' ||
+        (!txn.trade_mode && txn.product_type !== 'MIS')
+      );
+    });
+  }, [transactions, isIntraday]);
+
+  // Filtered transactions for search & selection
+  const filteredTransactions = useMemo(() => {
+    return modeTransactions.filter((txn) => {
       const matchSearch =
         txn.ticker.toLowerCase().includes(searchTerm.toLowerCase()) ||
         txn.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -121,35 +96,28 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       if (typeFilter === 'ENTRIES') {
         matchType = txn.type === 'ENTRY_BUY' || txn.type === 'ENTRY_SELL';
       } else if (typeFilter === 'EXITS') {
-        matchType = txn.type === 'EXIT_CLOSE' || txn.type === 'STOP_LOSS' || txn.type === 'TARGET_EXIT';
+        matchType =
+          txn.type === 'EXIT_CLOSE' ||
+          txn.type === 'STOP_LOSS' ||
+          txn.type === 'TARGET_EXIT';
       }
 
-      let matchStatus = true;
-      const { isActive } = getActivePositionData(txn);
-      if (statusFilter === 'ACTIVE') {
-        matchStatus = isActive;
-      } else if (statusFilter === 'CLOSED') {
-        matchStatus = !isActive;
-      }
-
-      return matchSearch && matchAction && matchType && matchStatus;
+      return matchSearch && matchAction && matchType;
     });
-  }, [transactions, openPositions, searchTerm, actionFilter, typeFilter, statusFilter]);
+  }, [modeTransactions, searchTerm, actionFilter, typeFilter]);
 
-  // Aggregate Metrics
-  const totalCount = transactions.length;
-  const totalVolume = transactions.reduce((sum, t) => sum + t.total_value, 0);
-  const buyVolume = transactions.filter((t) => t.action === 'BUY').reduce((sum, t) => sum + t.total_value, 0);
-  const sellVolume = transactions.filter((t) => t.action === 'SELL').reduce((sum, t) => sum + t.total_value, 0);
+  // Aggregate Metrics strictly scoped to current mode
+  const totalCount = modeTransactions.length;
+  const totalVolume = modeTransactions.reduce((sum, t) => sum + t.total_value, 0);
+  const buyVolume = modeTransactions.filter((t) => t.action === 'BUY').reduce((sum, t) => sum + t.total_value, 0);
+  const sellVolume = modeTransactions.filter((t) => t.action === 'SELL').reduce((sum, t) => sum + t.total_value, 0);
 
-  const closedTransactions = transactions.filter((t) => t.realized_pnl !== undefined);
+  const closedTransactions = modeTransactions.filter((t) => t.realized_pnl !== undefined);
   const totalRealizedPnl = closedTransactions.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
   const winCount = closedTransactions.filter((t) => (t.realized_pnl || 0) > 0).length;
   const winRate = closedTransactions.length > 0 ? (winCount / closedTransactions.length) * 100 : 0;
-
-  // Active trades aggregates
-  const activeTransactions = transactions.filter((t) => getActivePositionData(t).isActive);
-  const totalActivePnl = activeTransactions.reduce((sum, t) => sum + (getActivePositionData(t).currentPnl || 0), 0);
+  const entriesCount = modeTransactions.filter((t) => t.type === 'ENTRY_BUY' || t.type === 'ENTRY_SELL').length;
+  const exitsCount = closedTransactions.length;
 
   const handleRefreshClick = async () => {
     setIsRefreshing(true);
@@ -162,68 +130,60 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
   // Export to CSV
   const handleExportCSV = () => {
-    if (transactions.length === 0) return;
+    if (modeTransactions.length === 0) return;
     const headers = [
       'Transaction ID',
       'Order ID',
       'Timestamp',
       'Ticker',
       'Company Name',
-      'Sector',
+      'Product Type',
       'Action',
       'Type',
       'Shares',
       'Fill Price (INR)',
       'Total Value (INR)',
-      'Current Price (INR)',
-      'Current Profit/Loss (INR)',
-      'Current Return %',
-      'Is Active',
       'Stop Loss',
       'Target Price',
-      'Rupee Risk',
       'Realized PnL (INR)',
       'Realized Return %',
       'Execution Mode',
       'Status',
+      'Strategy',
       'Notes',
     ];
 
-    const rows = transactions.map((t) => {
-      const pos = getActivePositionData(t);
-      return [
-        t.id,
-        t.order_id,
-        t.timestamp,
-        t.ticker,
-        `"${t.company_name || t.ticker}"`,
-        `"${t.sector || 'NSE'}"`,
-        t.action,
-        t.type,
-        t.shares,
-        t.price,
-        t.total_value,
-        pos.currentPrice.toFixed(2),
-        pos.isActive && pos.currentPnl !== undefined ? pos.currentPnl.toFixed(2) : '',
-        pos.isActive && pos.currentPnlPct !== undefined ? pos.currentPnlPct.toFixed(2) : '',
-        pos.isActive ? 'YES' : 'NO',
-        t.stop_loss || '',
-        t.target_price || '',
-        t.rupee_risk || '',
-        t.realized_pnl ?? '',
-        t.realized_pnl_pct ?? '',
-        t.execution_mode,
-        t.status,
-        `"${(t.notes || '').replace(/"/g, '""')}"`,
-      ];
-    });
+    const rows = modeTransactions.map((t) => [
+      t.id,
+      t.order_id,
+      t.timestamp,
+      t.ticker,
+      `"${t.company_name || t.ticker}"`,
+      t.product_type || (isIntraday ? 'MIS' : 'CNC'),
+      t.action,
+      t.type,
+      t.shares,
+      t.price,
+      t.total_value,
+      t.stop_loss || '',
+      t.target_price || '',
+      t.realized_pnl ?? '',
+      t.realized_pnl_pct ?? '',
+      t.execution_mode,
+      t.status,
+      `"${t.strategy_name || ''}"`,
+      `"${(t.notes || '').replace(/"/g, '""')}"`,
+    ]);
 
     const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `nse_trading_bot_transactions_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute(
+      'download',
+      `nse_${isIntraday ? 'intraday' : 'long'}_transactions_${new Date().toISOString().split('T')[0]}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -231,445 +191,324 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
   return (
     <div id="transaction-history-container" className="space-y-6">
-      {/* Header Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-xs">
-        <div>
+      {/* SYSTEM SWITCHABLE TABS BANNER */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-stone-900">Transaction Audit Ledger</h2>
-            <span className="rounded-md bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-700">
-              {totalCount} Total Events
+            <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+              Audit Horizon
             </span>
-            {activeTransactions.length > 0 && (
-              <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                </span>
-                {activeTransactions.length} Active Trades
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 font-mono text-[10px] font-bold text-stone-700">
+              <Database className="h-3 w-3 text-stone-500" />
+              Isolated DB: {isIntraday ? 'intraday_trades.sqlite' : 'long_trades.sqlite'}
+            </span>
           </div>
-          <p className="mt-1 text-xs text-stone-500">
-            Immutable chronological record of every paper-simulated and broker-routed transaction, live mark-to-market active trades profit/loss, execution slippage, risk stops, and realized gains.
+          <h2 className="text-base font-black text-stone-900 tracking-tight flex items-center gap-2">
+            {isIntraday ? '⚡ Intraday Transaction Audit Ledger (MIS)' : '📈 Long Trading Transaction Audit Ledger (CNC)'}
+          </h2>
+          <p className="text-xs text-stone-500">
+            {isIntraday
+              ? 'Immutable log of same-day Intraday MIS orders, entries, stop hits, and 15:15 square-offs.'
+              : 'Immutable log of multi-day Delivery CNC accumulation, rotational rebalances, and swing targets.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center rounded-xl bg-stone-100 p-1 border border-stone-200 w-full sm:w-auto">
           <button
-            id="btn-refresh-transactions"
-            onClick={handleRefreshClick}
-            disabled={isRefreshing}
-            className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50"
+            type="button"
+            onClick={() => onTradingModeChange?.('INTRADAY')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition shadow-xs ${
+              isIntraday
+                ? 'bg-amber-500 text-stone-950 font-black'
+                : 'text-stone-600 hover:text-stone-900'
+            }`}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh
+            <Zap className={`h-3.5 w-3.5 ${isIntraday ? 'fill-stone-950 text-stone-950' : 'text-amber-500'}`} />
+            <span>⚡ Intraday Ledger (MIS)</span>
           </button>
-
           <button
-            id="btn-export-csv"
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 transition shadow-xs"
+            type="button"
+            onClick={() => onTradingModeChange?.('SWING')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition shadow-xs ${
+              !isIntraday
+                ? 'bg-blue-600 text-white font-black'
+                : 'text-stone-600 hover:text-stone-900'
+            }`}
           >
-            <Download className="h-3.5 w-3.5 text-amber-400" />
-            Export CSV
+            <TrendingUp className="h-3.5 w-3.5 text-white" />
+            <span>📈 Long Ledger (CNC)</span>
           </button>
         </div>
       </div>
 
-      {/* Metric Cards Row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* METRIC CARDS ROW - STREAMLINED & NON-REPETITIVE */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Turnover Volume</span>
-          <p className="mt-1 text-2xl font-extrabold text-stone-900">
+          <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block font-sans">
+            Turnover Volume
+          </span>
+          <p className="mt-1 font-mono text-xl font-black text-stone-900">
             ₹{totalVolume.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </p>
-          <div className="mt-1 flex items-center justify-between text-[11px] text-stone-500">
+          <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-stone-500">
             <span>Buy: ₹{buyVolume.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
             <span>Sell: ₹{sellVolume.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
           </div>
         </div>
 
-        {/* Active Trades Live Profit/Loss Card */}
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Active Trades P&L</span>
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-            </span>
-          </div>
-          <p className={`mt-1 text-2xl font-extrabold ${totalActivePnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {totalActivePnl >= 0 ? '+' : ''}₹{totalActivePnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block font-sans">
+            Net Realized P&amp;L
+          </span>
+          <p className={`mt-1 font-mono text-xl font-black ${totalRealizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {totalRealizedPnl >= 0 ? '+' : ''}₹{totalRealizedPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
-          <div className="mt-1 flex items-center justify-between text-[11px] text-stone-500">
-            <span>{activeTransactions.length} Active Position{activeTransactions.length === 1 ? '' : 's'}</span>
-            <span className="font-semibold text-stone-600">Live MTM</span>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Net Realized P&L</span>
-          <p className={`mt-1 text-2xl font-extrabold ${totalRealizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {totalRealizedPnl >= 0 ? '+' : ''}₹{totalRealizedPnl.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-          </p>
-          <span className="text-[11px] text-stone-500">
+          <span className="text-[10px] text-stone-500 block mt-1">
             From {closedTransactions.length} closed round-trips
           </span>
         </div>
 
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Round-Trip Win Rate</span>
-          <p className="mt-1 text-2xl font-extrabold text-stone-900">{winRate.toFixed(1)}%</p>
-          <span className="text-[11px] text-stone-500">
+          <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block font-sans">
+            Round-Trip Win Rate
+          </span>
+          <p className="mt-1 font-mono text-xl font-black text-purple-700">
+            {winRate.toFixed(1)}%
+          </p>
+          <span className="text-[10px] text-stone-500 block mt-1">
             {winCount} Profitable / {closedTransactions.length} Closed
           </span>
         </div>
 
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Execution Pipeline</span>
-          <p className="mt-1 text-2xl font-extrabold text-stone-900">0.05%</p>
-          <span className="text-[11px] text-stone-500">
-            Slippage model applied on fills
+          <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block font-sans">
+            Executed Orders
+          </span>
+          <p className="mt-1 font-mono text-xl font-black text-stone-900">
+            {totalCount} Orders
+          </p>
+          <span className="text-[10px] text-stone-500 block mt-1">
+            {entriesCount} Entries &bull; {exitsCount} Exits
           </span>
         </div>
       </div>
 
-      {/* DEDICATED ACTIVE TRADES & LIVE P&L FULL DETAILS LEDGER */}
-      {openPositions && openPositions.length > 0 && (
-        <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
-                <Activity className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-stone-900">
-                    Active Trades & Live P&L — Full Details Ledger ({openPositions.length})
-                  </h3>
-                  <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                    </span>
-                    Live Mark-to-Market
-                  </span>
-                </div>
-                <p className="text-xs text-stone-500">
-                  Comprehensive live surveillance of current open positions, risk boundaries, real-time CMP, and unrealized floating P&L.
-                </p>
-              </div>
+      {/* ACTIVE TRADES SECTION: LIVE TRADES (BLUE BOUNDARY BOXES) & ENDED TRADES (YELLOW LINE BOXES) */}
+      {(modePositions.length > 0 || closedTransactions.length > 0) && (
+        <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900/70 p-4 sm:p-5 shadow-xs space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 dark:border-stone-800 pb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-600"></span>
+              </span>
+              <h3 className="text-sm font-black text-stone-900 dark:text-white tracking-tight flex flex-wrap items-center gap-2">
+                <span>Active Trades — {isIntraday ? 'Intraday (MIS)' : 'Long (CNC)'} Status Overview</span>
+                <span className="rounded-md border-2 border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300 font-mono text-[10px] font-black px-2 py-0.5">
+                  🔵 {modePositions.length} LIVE (Blue Box)
+                </span>
+                <span className="rounded-md border-2 border-yellow-400 bg-yellow-400/15 text-yellow-800 dark:text-yellow-300 font-mono text-[10px] font-black px-2 py-0.5">
+                  🟡 {closedTransactions.length} ENDED (Yellow Line Box)
+                </span>
+              </h3>
             </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setStatusFilter('ACTIVE')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 transition shadow-2xs"
-              >
-                <Filter className="h-3 w-3 text-stone-500" />
-                Filter Table to Active
-              </button>
-              <button
-                onClick={() => setShowActiveDetails(!showActiveDetails)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 transition shadow-2xs"
-              >
-                {showActiveDetails ? (
-                  <>
-                    <ChevronUp className="h-3.5 w-3.5" />
-                    <span>Collapse</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="h-3.5 w-3.5" />
-                    <span>Expand Details</span>
-                  </>
-                )}
-              </button>
+            <div className="flex items-center gap-2 text-[10px] font-bold">
+              <span className="inline-flex items-center gap-1.5 rounded-md border-2 border-blue-500 bg-blue-50 px-2 py-0.5 text-blue-800">
+                <span className="h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
+                Blue Boundary = LIVE TRADE
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-md border-2 border-yellow-400 bg-yellow-50 px-2 py-0.5 text-yellow-900">
+                <span className="h-0.5 w-3 bg-yellow-500" />
+                Yellow Line Box = ENDED TRADE
+              </span>
             </div>
           </div>
 
-          {showActiveDetails && (
-            <>
-              {/* Active Portfolio Metrics */}
-              {(() => {
-                const totalInvested = openPositions.reduce((s, p) => s + (p.fill_price * p.shares), 0);
-                const totalCurrentVal = openPositions.reduce((s, p) => s + ((p.current_price || p.fill_price) * p.shares), 0);
-                const totalUnrealized = openPositions.reduce((s, p) => {
-                  const cmp = p.current_price || p.fill_price;
-                  return s + (p.unrealized_pnl ?? ((cmp - p.fill_price) * p.shares * (p.action === 'BUY' ? 1 : -1)));
-                }, 0);
-                const totalRiskRupees = openPositions.reduce((s, p) => s + (p.rupee_risk || Math.max(0, Math.abs(p.fill_price - p.stop_loss) * p.shares)), 0);
-                const avgRR = openPositions.length > 0
-                  ? openPositions.reduce((s, p) => {
-                      const risk = Math.abs(p.fill_price - p.stop_loss) || 1;
-                      const reward = Math.abs(p.target_price - p.fill_price);
-                      return s + (reward / risk);
-                    }, 0) / openPositions.length
-                  : 0;
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {/* LIVE TRADES IN BLUE BOUNDARY BOXES */}
+            {modePositions.map((pos) => {
+              const currentPrice = pos.current_price || pos.fill_price;
+              const invested = pos.fill_price * pos.shares;
+              const pnl = pos.action === 'BUY'
+                ? (currentPrice - pos.fill_price) * pos.shares
+                : (pos.fill_price - currentPrice) * pos.shares;
+              const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+              const isProfit = pnl >= 0;
 
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Active Exposure</span>
-                      <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
-                        ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      </p>
-                      <span className="text-[10px] text-stone-500">{openPositions.length} active trade{openPositions.length === 1 ? '' : 's'}</span>
+              return (
+                <div
+                  key={pos.order_id}
+                  className="rounded-xl border-2 border-blue-500 bg-blue-50/30 dark:bg-blue-950/20 p-3.5 shadow-sm ring-2 ring-blue-500/15 flex flex-col justify-between gap-2.5"
+                >
+                  <div className="flex items-center justify-between border-b-2 border-blue-300 dark:border-blue-800 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+                        <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                        LIVE TRADE
+                      </span>
+                      <span className="font-mono text-xs font-black text-stone-900 dark:text-white">
+                        {pos.ticker}
+                      </span>
+                      <span className="rounded bg-blue-100 text-blue-800 px-1.5 py-0.2 font-mono text-[9px] font-bold">
+                        {pos.product_type || (isIntraday ? 'MIS' : 'CNC')}
+                      </span>
                     </div>
-
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Current Market Value</span>
-                      <p className="mt-0.5 font-mono text-base font-bold text-stone-900">
-                        ₹{totalCurrentVal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      </p>
-                      <span className="text-[10px] text-stone-500">Live mark-to-market</span>
-                    </div>
-
-                    <div className={`rounded-xl border p-3 ${totalUnrealized >= 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'}`}>
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Unrealized MTM P&L</span>
-                      <p className={`mt-0.5 font-mono text-base font-black ${totalUnrealized >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                        {totalUnrealized >= 0 ? '+' : ''}₹{totalUnrealized.toFixed(2)}
-                        <span className="ml-1 text-xs font-bold">
-                          ({totalInvested > 0 ? ((totalUnrealized / totalInvested) * 100).toFixed(2) : '0.00'}%)
-                        </span>
-                      </p>
-                      <span className="text-[10px] text-stone-500">Net floating balance</span>
-                    </div>
-
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Total Risk at Stake</span>
-                      <p className="mt-0.5 font-mono text-base font-bold text-rose-600">
-                        ₹{totalRiskRupees.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      </p>
-                      <span className="text-[10px] text-stone-500">Hard stop-loss bound</span>
-                    </div>
-
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">Avg Risk:Reward</span>
-                      <p className="mt-0.5 font-mono text-base font-bold text-blue-600">
-                        {avgRR.toFixed(2)} : 1
-                      </p>
-                      <span className="text-[10px] text-stone-500">System expectancy</span>
+                    <div className="text-right font-mono">
+                      <span className={`text-xs font-black ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {isProfit ? '+' : ''}₹{pnl.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)
+                      </span>
                     </div>
                   </div>
-                );
-              })()}
 
-              {/* Full Details Open Positions Table */}
-              <div className="overflow-x-auto rounded-xl border border-stone-200">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-stone-50/90 border-b border-stone-200 text-stone-500 uppercase text-[10px] tracking-wider">
-                    <tr>
-                      <th className="py-2.5 px-3 font-semibold">Stock / Order</th>
-                      <th className="py-2.5 px-3 font-semibold">Action</th>
-                      <th className="py-2.5 px-3 font-semibold">Size & Exposure</th>
-                      <th className="py-2.5 px-3 font-semibold">Entry Fill</th>
-                      <th className="py-2.5 px-3 font-semibold">Live Price (CMP)</th>
-                      <th className="py-2.5 px-3 font-semibold">Stop Loss</th>
-                      <th className="py-2.5 px-3 font-semibold">Target Price</th>
-                      <th className="py-2.5 px-3 font-semibold">R:R & Risk ₹</th>
-                      <th className="py-2.5 px-3 font-semibold">Target Progress</th>
-                      <th className="py-2.5 px-3 font-semibold">Unrealized P&L</th>
-                      <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100 bg-white font-mono">
-                    {openPositions.map((pos) => {
-                      const currentPrice = pos.current_price || pos.fill_price;
-                      const pnl = pos.unrealized_pnl ?? ((currentPrice - pos.fill_price) * pos.shares * (pos.action === 'BUY' ? 1 : -1));
-                      const pnlPct = pos.unrealized_pnl_pct ?? (pos.fill_price > 0 ? (pnl / (pos.fill_price * pos.shares)) * 100 : 0);
-                      const positionExposure = pos.fill_price * pos.shares;
-                      const priceChangePct = pos.fill_price > 0 ? ((currentPrice - pos.fill_price) / pos.fill_price) * 100 : 0;
-                      const slDistPct = pos.fill_price > 0 ? Math.abs((pos.stop_loss - currentPrice) / currentPrice) * 100 : 0;
-                      const tgtDistPct = pos.fill_price > 0 ? Math.abs((pos.target_price - currentPrice) / currentPrice) * 100 : 0;
+                  <div className="grid grid-cols-3 gap-2 font-mono text-[11px] bg-white/80 dark:bg-stone-900/70 rounded-lg p-2 border border-blue-200 dark:border-blue-900">
+                    <div>
+                      <span className="text-[9px] text-stone-400 block font-sans uppercase">Shares</span>
+                      <strong className="text-stone-900 dark:text-white">{pos.shares} ({pos.action})</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-stone-400 block font-sans uppercase">Entry</span>
+                      <strong className="text-stone-700 dark:text-stone-300">₹{pos.fill_price.toFixed(2)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-blue-600 block font-sans uppercase font-bold">Live LTP</span>
+                      <strong className="text-blue-700 dark:text-blue-300">₹{currentPrice.toFixed(2)}</strong>
+                    </div>
+                  </div>
 
-                      // Progress calculation towards target (0% at SL, 100% at Target)
-                      const totalRange = Math.abs(pos.target_price - pos.stop_loss) || 1;
-                      const currentProg = pos.action === 'BUY'
-                        ? Math.min(100, Math.max(0, ((currentPrice - pos.stop_loss) / totalRange) * 100))
-                        : Math.min(100, Math.max(0, ((pos.stop_loss - currentPrice) / totalRange) * 100));
+                  <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => onSelectStrategy?.(pos.strategy_id || pos.strategy_name || 'algo-flagship-cognitive-q')}
+                      className="inline-flex items-center gap-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 font-semibold px-2 py-0.5 border border-purple-200 transition truncate max-w-[180px]"
+                    >
+                      🔍 {pos.strategy_name || 'Quantitative Strategy'}
+                    </button>
+                    <div className="flex items-center gap-2 font-mono text-stone-500">
+                      <span>SL: ₹{pos.stop_loss}</span>
+                      <span>TP: ₹{pos.target_price}</span>
+                      {onClosePosition && (
+                        <button
+                          type="button"
+                          onClick={() => onClosePosition(pos.order_id, currentPrice, 'Manual Discretionary Exit')}
+                          className="rounded bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 text-[9px] font-bold transition"
+                        >
+                          Close
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
 
-                      const riskPerShare = Math.abs(pos.fill_price - pos.stop_loss);
-                      const rewardPerShare = Math.abs(pos.target_price - pos.fill_price);
-                      const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(2) : '2.0';
-                      const maxRiskRupees = pos.rupee_risk || (riskPerShare * pos.shares);
+            {/* ENDED TRADES IN BOXES WITH YELLOW LINES */}
+            {closedTransactions.slice(0, 6).map((txn, idx) => {
+              const pnl = txn.realized_pnl || 0;
+              const pnlPct = txn.realized_pnl_pct || 0;
+              const isProfit = pnl >= 0;
 
-                      return (
-                        <tr key={pos.order_id} className="hover:bg-stone-50/70 transition">
-                          <td className="py-3 px-3">
-                            <div className="font-bold text-stone-900 font-sans flex items-center gap-1.5">
-                              {pos.ticker}
-                              {onSelectTickerForPipeline && (
-                                <button
-                                  onClick={() => onSelectTickerForPipeline(pos.ticker)}
-                                  className="text-stone-400 hover:text-blue-600 transition"
-                                  title="Inspect in Pipeline & Radar"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </button>
-                              )}
-                            </div>
-                            <span className="font-mono text-[10px] text-stone-400">
-                              {pos.order_id.slice(0, 16)}...
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold font-sans ${
-                              pos.action === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                            }`}>
-                              {pos.action === 'BUY' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                              {pos.action}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-mono font-semibold text-stone-900">{pos.shares} shares</div>
-                            <div className="font-mono text-[10px] text-stone-500">₹{positionExposure.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                          </td>
-                          <td className="py-3 px-3 font-mono font-medium text-stone-800">
-                            ₹{pos.fill_price.toFixed(2)}
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-mono font-bold text-stone-900">
-                              ₹{currentPrice.toFixed(2)}
-                            </div>
-                            <div className={`font-mono text-[10px] ${priceChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-mono font-semibold text-rose-600">
-                              ₹{pos.stop_loss.toFixed(2)}
-                            </div>
-                            <div className="text-[10px] text-stone-400 font-sans">
-                              {slDistPct.toFixed(1)}% away
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-mono font-semibold text-emerald-600">
-                              ₹{pos.target_price.toFixed(2)}
-                            </div>
-                            <div className="text-[10px] text-stone-400 font-sans">
-                              {tgtDistPct.toFixed(1)}% away
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="font-mono font-medium text-blue-600 text-[11px]">
-                              {rrRatio}:1 R:R
-                            </div>
-                            <div className="font-mono text-[10px] text-stone-500">
-                              ₹{maxRiskRupees.toFixed(0)} risk
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 min-w-[120px]">
-                            <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 mb-1">
-                              <span>SL</span>
-                              <span className="font-bold text-stone-700">{currentProg.toFixed(0)}%</span>
-                              <span>TGT</span>
-                            </div>
-                            <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
-                              <div
-                                className={`h-full transition-all duration-300 ${
-                                  pnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
-                                }`}
-                                style={{ width: `${currentProg}%` }}
-                              />
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className={`font-mono text-xs font-black ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {pnl >= 0 ? '+' : ''}₹{pnl.toFixed(2)}
-                            </div>
-                            <div className={`font-mono text-[10px] font-bold ${pnlPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                              {pnlPct >= 0 ? '+' : ''}{Number(pnlPct).toFixed(2)}%
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 text-right">
-                            {onClosePosition && (
-                              <button
-                                onClick={() => handleOpenCloseModal(pos)}
-                                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-900 hover:text-white transition shadow-2xs whitespace-nowrap font-sans"
-                              >
-                                Close Trade
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
+              return (
+                <div
+                  key={`${txn.id}-ended-${idx}`}
+                  className="rounded-xl border-2 border-yellow-400 bg-yellow-50/40 dark:bg-yellow-950/20 p-3.5 shadow-sm ring-2 ring-yellow-400/20 flex flex-col justify-between gap-2.5"
+                >
+                  <div className="flex items-center justify-between border-b-2 border-dashed border-yellow-400 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded bg-yellow-400 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-stone-950 border border-yellow-500">
+                        ENDED TRADE
+                      </span>
+                      <span className="font-mono text-xs font-black text-stone-900 dark:text-white">
+                        {txn.ticker}
+                      </span>
+                      <span className="rounded bg-yellow-200/80 text-yellow-950 px-1.5 py-0.2 font-mono text-[9px] font-bold">
+                        {txn.product_type || (isIntraday ? 'MIS' : 'CNC')}
+                      </span>
+                    </div>
+                    <div className="text-right font-mono">
+                      <span className={`text-xs font-black ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {isProfit ? '+' : ''}₹{pnl.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 font-mono text-[11px] bg-white/85 dark:bg-stone-900/70 rounded-lg p-2 border-y-2 border-yellow-300 dark:border-yellow-700/60">
+                    <div>
+                      <span className="text-[9px] text-stone-400 block font-sans uppercase">Shares</span>
+                      <strong className="text-stone-900 dark:text-white">{txn.shares} ({txn.action})</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-yellow-700 block font-sans uppercase font-bold">Exit Fill</span>
+                      <strong className="text-stone-900 dark:text-white">₹{txn.price.toFixed(2)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-stone-400 block font-sans uppercase">Turn Value</span>
+                      <strong className="text-stone-700 dark:text-stone-300">₹{txn.total_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-dashed border-yellow-400 text-[10px]">
+                    {txn.strategy_name ? (
+                      <button
+                        type="button"
+                        onClick={() => onSelectStrategy?.(txn.strategy_id || txn.strategy_name)}
+                        className="inline-flex items-center gap-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 font-semibold px-2 py-0.5 border border-purple-200 transition truncate max-w-[180px]"
+                      >
+                        🔍 {txn.strategy_name}
+                      </button>
+                    ) : (
+                      <span className="text-stone-500 font-mono">{txn.type.replace('_', ' ')}</span>
+                    )}
+                    <span className="font-mono text-yellow-900 dark:text-yellow-300 font-semibold">
+                      Closed &bull; {new Date(txn.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Controls & Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+      {/* FILTER & ACTIONS BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white p-3.5 shadow-xs">
         {/* Search */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-stone-400" />
           <input
             id="input-search-transactions"
             type="text"
-            placeholder="Search by Ticker, TXN ID, or Order..."
+            placeholder={`Search ${isIntraday ? 'Intraday' : 'Long'} by Ticker, TXN ID, or Order...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-3 py-1.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:bg-white focus:outline-none"
+            className="w-full rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-3 py-1.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:bg-white focus:outline-hidden font-sans"
           />
-        </div>
-
-        {/* Status Filter (All, Active, Closed) */}
-        <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1 text-xs">
-          <button
-            onClick={() => setStatusFilter('ALL')}
-            className={`rounded-md px-2.5 py-1 font-medium transition ${
-              statusFilter === 'ALL' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setStatusFilter('ACTIVE')}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition ${
-              statusFilter === 'ACTIVE' ? 'bg-emerald-600 text-white shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${statusFilter === 'ACTIVE' ? 'bg-white animate-ping' : 'bg-emerald-500'}`}></span>
-            Active Trades ({activeTransactions.length})
-          </button>
-          <button
-            onClick={() => setStatusFilter('CLOSED')}
-            className={`rounded-md px-2.5 py-1 font-medium transition ${
-              statusFilter === 'CLOSED' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            Closed
-          </button>
         </div>
 
         {/* Action Filter */}
         <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1 text-xs">
           <button
+            type="button"
             onClick={() => setActionFilter('ALL')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              actionFilter === 'ALL' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              actionFilter === 'ALL' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
             All Actions
           </button>
           <button
+            type="button"
             onClick={() => setActionFilter('BUY')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              actionFilter === 'BUY' ? 'bg-emerald-600 text-white shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              actionFilter === 'BUY' ? 'bg-emerald-600 text-white shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
             BUY
           </button>
           <button
+            type="button"
             onClick={() => setActionFilter('SELL')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              actionFilter === 'SELL' ? 'bg-rose-600 text-white shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              actionFilter === 'SELL' ? 'bg-rose-600 text-white shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
             SELL
@@ -679,67 +518,106 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
         {/* Type Filter */}
         <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1 text-xs">
           <button
+            type="button"
             onClick={() => setTypeFilter('ALL')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              typeFilter === 'ALL' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              typeFilter === 'ALL' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
             All Types
           </button>
           <button
+            type="button"
             onClick={() => setTypeFilter('ENTRIES')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              typeFilter === 'ENTRIES' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              typeFilter === 'ENTRIES' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
             Entries
           </button>
           <button
+            type="button"
             onClick={() => setTypeFilter('EXITS')}
             className={`rounded-md px-2.5 py-1 font-medium transition ${
-              typeFilter === 'EXITS' ? 'bg-white text-stone-900 shadow-2xs font-semibold' : 'text-stone-500 hover:text-stone-900'
+              typeFilter === 'EXITS' ? 'bg-white text-stone-900 shadow-2xs font-bold' : 'text-stone-500 hover:text-stone-900'
             }`}
           >
-            Exits & Closes
+            Exits
+          </button>
+        </div>
+
+        {/* Actions: Refresh & Exports */}
+        <div className="flex items-center gap-2">
+          <button
+            id="btn-refresh-transactions"
+            type="button"
+            onClick={handleRefreshClick}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition disabled:opacity-50"
+            title="Refresh Ledger"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            id="btn-export-pdf"
+            type="button"
+            onClick={onOpenPdfReport || (() => { window.location.href = '/api/export-trades-pdf'; })}
+            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-stone-950 hover:bg-amber-400 transition shadow-xs"
+            title="Official PDF Audit Report"
+          >
+            <Download className="h-3.5 w-3.5 text-stone-950" />
+            <span>PDF Report</span>
+          </button>
+
+          <button
+            id="btn-export-csv"
+            type="button"
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 transition shadow-xs"
+            title="Export CSV spreadsheet"
+          >
+            <Download className="h-3.5 w-3.5 text-amber-400" />
+            <span>CSV</span>
           </button>
         </div>
       </div>
 
-      {/* Transactions Table */}
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
+      {/* TRANSACTIONS TABLE - CLEAR, DETAILED, NO REPETITION */}
+      <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-stone-700">
             <thead className="border-b border-stone-200 bg-stone-50 text-[11px] font-bold uppercase tracking-wider text-stone-500">
               <tr>
                 <th className="px-4 py-3">Txn ID / Time</th>
                 <th className="px-4 py-3">Instrument</th>
-                <th className="px-4 py-3">Type & Action</th>
+                <th className="px-4 py-3">Type &amp; Action</th>
                 <th className="px-4 py-3 text-right">Shares</th>
                 <th className="px-4 py-3 text-right">Fill Price</th>
                 <th className="px-4 py-3 text-right">Total Value</th>
-                <th className="px-4 py-3">Stops & Target</th>
-                <th className="px-4 py-3 text-right">Current Profit / Loss</th>
-                <th className="px-4 py-3 text-right">Realized P&L</th>
-                <th className="px-4 py-3">Mode & Status</th>
-                <th className="px-4 py-3">Notes / Reflection</th>
+                <th className="px-4 py-3">Stops &amp; Target</th>
+                <th className="px-4 py-3 text-right">Realized P&amp;L</th>
+                <th className="px-4 py-3">Mode &amp; Status</th>
+                <th className="px-4 py-3">Strategy Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 font-mono">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-xs text-stone-400 font-sans">
-                    No transactions matching your criteria. Execute trades via the pipeline to log real transactions here.
+                  <td colSpan={10} className="py-12 text-center text-xs text-stone-400 font-sans">
+                    No transactions matching your criteria in the <strong>{isIntraday ? 'Intraday (MIS)' : 'Long (CNC)'}</strong> system.
                   </td>
                 </tr>
               ) : (
-                filteredTransactions.map((txn) => {
+                filteredTransactions.map((txn, idx) => {
                   const isBuy = txn.action === 'BUY';
                   const isEntry = txn.type === 'ENTRY_BUY' || txn.type === 'ENTRY_SELL';
                   const hasPnl = txn.realized_pnl !== undefined;
-                  const posData = getActivePositionData(txn);
+                  const prodBadge = txn.product_type || (isIntraday ? 'MIS' : 'CNC');
 
                   return (
-                    <tr key={txn.id} className="hover:bg-stone-50/80 transition">
+                    <tr key={`${txn.id}-${txn.order_id}-${idx}`} className="hover:bg-stone-50/80 transition">
                       {/* Txn ID & Time */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="font-bold text-stone-900">{txn.id}</div>
@@ -756,21 +634,35 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
                       {/* Instrument */}
                       <td className="px-4 py-3 whitespace-nowrap font-sans">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => onSelectTickerForPipeline && onSelectTickerForPipeline(txn.ticker)}
+                            type="button"
+                            onClick={() => onSelectTickerForPipeline?.(txn.ticker)}
                             className="font-bold text-stone-900 hover:text-amber-600 transition"
                             title="Analyze in 4-layer pipeline"
                           >
                             {txn.ticker}
                           </button>
-                          <span className="rounded bg-stone-100 px-1 text-[9px] text-stone-500">.NS</span>
+                          <span className={`rounded px-1.5 py-0.2 font-mono text-[9px] font-bold ${
+                            prodBadge === 'CNC' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-900'
+                          }`}>
+                            {prodBadge}
+                          </span>
                         </div>
                         <div className="text-[10px] text-stone-500 truncate max-w-[140px]">
                           {txn.company_name || txn.ticker}
                         </div>
-                        {txn.sector && (
-                          <span className="text-[9px] text-stone-400">{txn.sector}</span>
+                        {txn.strategy_name && (
+                          <div className="mt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => onSelectStrategy?.(txn.strategy_id || txn.strategy_name)}
+                              className="inline-flex items-center gap-1 rounded bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 text-[9px] font-sans font-semibold px-1.5 py-0.2 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                              title={`Click to inspect all trades & return for ${txn.strategy_name}`}
+                            >
+                              🔍 {txn.strategy_name}
+                            </button>
+                          </div>
                         )}
                       </td>
 
@@ -833,35 +725,6 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                         )}
                       </td>
 
-                      {/* NEW COLUMN: Current Profit / Loss (for Active Trades) */}
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {posData.isActive && posData.currentPnl !== undefined ? (
-                          <div className="flex flex-col items-end">
-                            <div className={`font-bold font-mono text-xs flex items-center gap-1.5 ${posData.currentPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              <span className="relative flex h-1.5 w-1.5">
-                                <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${posData.currentPnl >= 0 ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
-                                <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${posData.currentPnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                              </span>
-                              <span>
-                                {posData.currentPnl >= 0 ? '+' : ''}₹{posData.currentPnl.toFixed(2)}
-                              </span>
-                            </div>
-                            <div className={`text-[10px] font-semibold ${posData.currentPnlPct !== undefined && posData.currentPnlPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {posData.currentPnlPct !== undefined && posData.currentPnlPct >= 0 ? '+' : ''}{posData.currentPnlPct?.toFixed(2)}%
-                            </div>
-                            <span className="text-[9px] text-stone-400 font-sans">
-                              CMP: ₹{posData.currentPrice.toFixed(2)}
-                            </span>
-                          </div>
-                        ) : hasPnl ? (
-                          <span className="inline-flex items-center rounded bg-stone-100 px-1.5 py-0.5 text-[9px] font-semibold text-stone-500 font-sans">
-                            Closed
-                          </span>
-                        ) : (
-                          <span className="text-stone-300 font-sans text-[11px]">&mdash;</span>
-                        )}
-                      </td>
-
                       {/* Realized PnL */}
                       <td className="px-4 py-3 text-right whitespace-nowrap font-bold">
                         {hasPnl ? (
@@ -873,13 +736,10 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                               {txn.realized_pnl_pct! >= 0 ? '+' : ''}{txn.realized_pnl_pct!.toFixed(2)}%
                             </div>
                           </div>
-                        ) : posData.isActive ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200 font-sans">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Active Trade
-                          </span>
                         ) : (
-                          <span className="text-stone-400 font-sans text-[11px]">&mdash;</span>
+                          <span className="inline-flex items-center rounded bg-stone-100 px-1.5 py-0.5 text-[9px] font-semibold text-stone-500 font-sans">
+                            Position Opened
+                          </span>
                         )}
                       </td>
 
@@ -910,118 +770,6 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </table>
         </div>
       </div>
-
-      {/* Close Position Modal */}
-      {closingPos && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600">
-                  <XCircle className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-stone-900">Close Position: {closingPos.ticker}</h3>
-                  <p className="text-[11px] text-stone-500">Order ID: {closingPos.order_id.slice(0, 16)}...</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setClosingPos(null)}
-                className="text-stone-400 hover:text-stone-600 transition"
-              >
-                <XCircle className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3.5 space-y-2 text-xs">
-              <div className="flex justify-between text-stone-600">
-                <span>Side / Quantity:</span>
-                <span className="font-mono font-bold text-stone-900">{closingPos.action} {closingPos.shares} shares</span>
-              </div>
-              <div className="flex justify-between text-stone-600">
-                <span>Entry Fill Price:</span>
-                <span className="font-mono font-bold text-stone-900">₹{closingPos.fill_price.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-stone-600">
-                <span>Stop Loss / Target:</span>
-                <span className="font-mono text-stone-700">₹{closingPos.stop_loss} / ₹{closingPos.target_price}</span>
-              </div>
-              <div className="flex justify-between text-stone-600">
-                <span>Current Market Price:</span>
-                <span className="font-mono font-bold text-blue-600">₹{(closingPos.current_price || closingPos.fill_price).toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Execution Exit Price (₹)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.05"
-                  value={exitPriceInput}
-                  onChange={(e) => setExitPriceInput(e.target.value)}
-                  className="w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-mono text-stone-900 focus:border-stone-400 focus:bg-white focus:outline-none"
-                  placeholder="Enter exit price"
-                />
-                <button
-                  type="button"
-                  onClick={() => setExitPriceInput((closingPos.current_price || closingPos.fill_price).toString())}
-                  className="whitespace-nowrap rounded-lg border border-stone-200 bg-stone-100 px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition"
-                >
-                  Use CMP
-                </button>
-              </div>
-            </div>
-
-            {/* Simulated Outcome Preview */}
-            {(() => {
-              const exitP = parseFloat(exitPriceInput);
-              if (!isNaN(exitP) && exitP > 0) {
-                const simulatedPnl = (exitP - closingPos.fill_price) * closingPos.shares * (closingPos.action === 'BUY' ? 1 : -1);
-                const simulatedPnlPct = (simulatedPnl / (closingPos.fill_price * closingPos.shares)) * 100;
-                return (
-                  <div className={`rounded-xl border p-3 text-xs ${simulatedPnl >= 0 ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'}`}>
-                    <div className="flex justify-between font-medium text-stone-600">
-                      <span>Simulated Realized P&L:</span>
-                      <span className={`font-mono font-bold ${simulatedPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                        {simulatedPnl >= 0 ? '+' : ''}₹{simulatedPnl.toFixed(2)} ({simulatedPnlPct >= 0 ? '+' : ''}{simulatedPnlPct.toFixed(2)}%)
-                      </span>
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            })()}
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setClosingPos(null)}
-                className="rounded-lg border border-stone-200 bg-stone-100 px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmClose}
-                disabled={isSubmittingClose || !exitPriceInput || parseFloat(exitPriceInput) <= 0}
-                className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 transition disabled:opacity-50 shadow-xs flex items-center gap-1.5"
-              >
-                {isSubmittingClose ? (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    <span>Executing Exit...</span>
-                  </>
-                ) : (
-                  <span>Confirm & Close Position</span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

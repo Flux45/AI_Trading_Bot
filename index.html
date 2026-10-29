@@ -9,6 +9,40 @@
     <meta property="og:description" content="Decoupled quantitative trading engine with real-time news recommendations from leading financial portals, universe volatility heatmap, Yahoo Finance market data, Gemini multi-agent debate, deterministic risk controls, and paper/Kite execution." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Global patch to ensure window.fetch is writable and configurable in iframe environments
+      (function() {
+        try {
+          if (typeof window !== 'undefined') {
+            const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+            let currentFetch = nativeFetch;
+
+            const descriptor = {
+              configurable: true,
+              enumerable: true,
+              get: function() {
+                return currentFetch;
+              },
+              set: function(newFetch) {
+                currentFetch = typeof newFetch === 'function' ? newFetch : nativeFetch;
+              }
+            };
+
+            // Define property on window first
+            try {
+              Object.defineProperty(window, 'fetch', descriptor);
+            } catch (e1) {
+              // If window definition fails, define on Window.prototype
+              if (typeof Window !== 'undefined' && Window.prototype) {
+                try {
+                  Object.defineProperty(Window.prototype, 'fetch', descriptor);
+                } catch (e2) {}
+              }
+            }
+          }
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
