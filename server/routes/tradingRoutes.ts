@@ -324,7 +324,70 @@ System: ${mode.toUpperCase()}`,
   }
 });
 
-// POST /api/orders/execute - Execute Order Manually into designated mode
+// GET /api/strategies/custom - Load user-created strategies from SQLite
+tradingRoutes.get("/api/strategies/custom", async (req, res) => {
+  const mode = (req.query.mode as string) || "intraday";
+  try {
+    const { dbGetCustomStrategies } = await import("../../server_db.ts");
+    const strategies = dbGetCustomStrategies(mode);
+    res.json({ success: true, strategies });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Failed to load custom strategies" });
+  }
+});
+
+// POST /api/strategies/custom - Save user-created strategy with restrictions to SQLite
+tradingRoutes.post("/api/strategies/custom", async (req, res) => {
+  try {
+    const {
+      name,
+      category = "Custom Quant",
+      horizon = "INTRADAY",
+      stop_loss_pct = 1.5,
+      target_pct = 3.75,
+      max_risk_rupees = 500,
+      entry_rules = "Price above 20 EMA + VWAP support confirmation",
+      exit_rules = "Target hit or trailing stop-loss triggered",
+      implications,
+    } = req.body || {};
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, error: "Strategy name is required" });
+    }
+
+    const sl = Math.max(0.2, Number(stop_loss_pct) || 1.5);
+    const tp = Math.max(0.5, Number(target_pct) || 3.75);
+    const rr = Number((tp / sl).toFixed(2));
+    const maxRisk = Math.min(2500, Math.max(100, Number(max_risk_rupees) || 500));
+    const mode = horizon === "LONG" || horizon === "SWING" ? "long" : "intraday";
+
+    const record = {
+      id: `custom-strat-${Date.now()}`,
+      name: String(name).trim(),
+      category: String(category),
+      horizon: mode === "long" ? "LONG" : "INTRADAY",
+      stop_loss_pct: sl,
+      target_pct: tp,
+      max_risk_rupees: maxRisk,
+      min_rr_ratio: rr,
+      entry_rules: String(entry_rules),
+      exit_rules: String(exit_rules),
+      implications:
+        implications ||
+        `Caps downside to ₹${maxRisk} per trade (${sl}% stop-loss) while targeting ${tp}% upside (${rr}:1 reward-to-risk ratio) in ${mode.toUpperCase()} mode.`,
+      created_at: new Date().toISOString(),
+    };
+
+    const { dbSaveCustomStrategy, dbGetCustomStrategies } = await import("../../server_db.ts");
+    dbSaveCustomStrategy(record, mode);
+    const allCustom = dbGetCustomStrategies(mode);
+    res.json({ success: true, strategy: record, strategies: allCustom });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Failed to save custom strategy" });
+  }
+});
+
+// POST /api/orders/execute - Execute Order Manually into designated mode with SQLite date/time & strategy metadata
 tradingRoutes.post("/api/orders/execute", async (req, res) => {
   try {
     const {
@@ -336,6 +399,8 @@ tradingRoutes.post("/api/orders/execute", async (req, res) => {
       ticket: incomingTicket,
       mode = "intraday",
       product_type,
+      strategy_id,
+      strategy_name,
     } = req.body || {};
 
     const cleanTicker = (ticker || incomingTicket?.ticker || "RELIANCE").toUpperCase().replace(".NS", "");
@@ -349,7 +414,9 @@ tradingRoutes.post("/api/orders/execute", async (req, res) => {
         action: incomingTicket.action || action,
         trade_mode: (mode.toUpperCase() === "LONG" ? "LONG" : "INTRADAY") as any,
         product_type: (product_type || (mode.toLowerCase() === "long" ? "CNC" : "MIS")) as any,
-      };
+        strategy_id: strategy_id || (incomingTicket as any).strategy_id,
+        strategy_name: strategy_name || (incomingTicket as any).strategy_name,
+      } as any;
     } else {
       const liveData = await fetchRealtimeLivePrice(cleanTicker);
       const curPrice = liveData.current_price;
@@ -386,6 +453,8 @@ tradingRoutes.post("/api/orders/execute", async (req, res) => {
         risk_reward_ratio: Number((Math.abs(tp - curPrice) / Math.max(riskPerShare, 0.01)).toFixed(2)),
         trade_mode: (mode.toUpperCase() === "LONG" ? "LONG" : "INTRADAY") as any,
         product_type: (product_type || (mode.toLowerCase() === "long" ? "CNC" : "MIS")) as any,
+        strategy_id,
+        strategy_name,
       } as any;
     }
 
@@ -405,7 +474,7 @@ tradingRoutes.post("/api/orders/execute", async (req, res) => {
       mode: mode.toUpperCase(),
       position: executed,
       openPositions,
-      message: `${mode.toUpperCase()} (${executed.product_type || "MIS"}) ${executed.action} order executed: ${executed.shares} shares of ${executed.ticker} @ ₹${executed.fill_price}.`,
+      message: `${mode.toUpperCase()} (${executed.product_type || "MIS"}) ${executed.action} order executed: ${executed.shares} shares of ${executed.ticker} @ ₹${executed.fill_price} [${executed.execution_date || ""} ${executed.execution_time || ""}].`,
       transactions: ledger.slice(0, 15),
     });
   } catch (err: any) {

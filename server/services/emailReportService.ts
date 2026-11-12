@@ -139,11 +139,15 @@ function loadPersistedState() {
     console.warn("[EmailSchedule] Failed to load persisted state:", err);
   }
 
-  if (!memoryScheduleConfig.nextScheduledAt) {
+  const nextMs = memoryScheduleConfig.nextScheduledAt
+    ? new Date(memoryScheduleConfig.nextScheduledAt).getTime()
+    : 0;
+  if (!memoryScheduleConfig.nextScheduledAt || nextMs <= Date.now()) {
     memoryScheduleConfig.nextScheduledAt = computeNextScheduledDate(
       memoryScheduleConfig.dayOfWeek,
       memoryScheduleConfig.timeOfDay
     );
+    savePersistedState();
   }
 }
 

@@ -211,6 +211,8 @@ export interface ExecutedPosition {
   strategy_name?: string;
   market_scenario_rationale?: string;
   entry_time?: string;
+  execution_date?: string;
+  execution_time?: string;
   trade_mode?: 'INTRADAY' | 'LONG';
   product_type?: 'MIS' | 'CNC';
   holding_duration?: string;
@@ -232,6 +234,8 @@ export interface TradeHistoryRecord {
   timestamp: string;
   entry_time?: string;
   exit_time?: string;
+  execution_date?: string;
+  execution_time?: string;
   duration?: string;
   duration_ms?: number;
   exit_reason?: string;
@@ -241,6 +245,21 @@ export interface TradeHistoryRecord {
   strategy_id?: string;
   strategy_name?: string;
   gain_loss_diagnosis?: string;
+}
+
+export interface CustomStrategyItem {
+  id: string;
+  name: string;
+  category: string;
+  horizon: 'INTRADAY' | 'LONG';
+  stop_loss_pct: number;
+  target_pct: number;
+  max_risk_rupees: number;
+  min_rr_ratio: number;
+  entry_rules: string;
+  exit_rules: string;
+  implications: string;
+  created_at: string;
 }
 
 export interface StrategyPerformanceSummary {
@@ -356,6 +375,8 @@ export interface TransactionRecord {
   id: string; // e.g. "TXN-001"
   order_id: string; // e.g. "PAPER_1"
   timestamp: string;
+  execution_date?: string;
+  execution_time?: string;
   ticker: string;
   company_name?: string;
   sector?: string;

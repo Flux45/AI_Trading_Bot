@@ -139,7 +139,7 @@ export const MarketSentimentDial: React.FC<MarketSentimentDialProps> = ({
       <div
         id="market-sentiment-dial-compact"
         onClick={onClickDetails}
-        className="flex items-center gap-4 rounded-xl border border-stone-200 bg-white p-3.5 shadow-xs transition hover:border-stone-300 hover:shadow-sm cursor-pointer"
+        className="flex items-center gap-4 rounded-xl border-2 border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-3.5 shadow-xs transition hover:border-blue-500 cursor-pointer"
       >
         <div className="relative shrink-0 flex flex-col items-center">
           <svg width={130} height={75} className="overflow-visible">
@@ -147,7 +147,7 @@ export const MarketSentimentDial: React.FC<MarketSentimentDialProps> = ({
             <path
               d={describeArc(65, 68, 52, -90, 90)}
               fill="none"
-              stroke="#e7e5e4"
+              stroke="#57534e"
               strokeWidth={8}
               strokeLinecap="round"
             />
@@ -175,19 +175,21 @@ export const MarketSentimentDial: React.FC<MarketSentimentDialProps> = ({
                 y1={68}
                 x2={65}
                 y2={22}
-                stroke="#1c1917"
+                stroke="#f59e0b"
                 strokeWidth={2.5}
                 strokeLinecap="round"
               />
-              <circle cx={65} cy={68} r={4.5} fill="#1c1917" />
+              <circle cx={65} cy={68} r={4.5} fill="#f59e0b" />
             </g>
           </svg>
-          <div className="-mt-3 font-extrabold text-stone-900 text-base">{score}</div>
+          <div className="-mt-3 font-mono font-extrabold text-stone-950 dark:text-white text-base tabular-nums">
+            {score}
+          </div>
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-stone-600 dark:text-stone-300">
               Market Sentiment Dial
             </span>
             <span
@@ -196,15 +198,15 @@ export const MarketSentimentDial: React.FC<MarketSentimentDialProps> = ({
               {bias}
             </span>
           </div>
-          <div className="mt-0.5 truncate text-xs font-semibold text-stone-800">{label}</div>
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
-            <span className="text-emerald-700 font-medium">+{bullishPct}% Bullish</span>
+          <div className="mt-0.5 truncate text-xs font-bold text-stone-950 dark:text-white">{label}</div>
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-600 dark:text-stone-300">
+            <span className="text-emerald-700 dark:text-emerald-400 font-bold">+{bullishPct}% Bullish</span>
             <span>•</span>
             <span className="truncate">{totalArticles} Scanned Articles</span>
           </div>
         </div>
 
-        <div className="shrink-0 text-stone-400">
+        <div className="shrink-0 text-stone-500 dark:text-stone-300">
           <ArrowUpRight className="h-4 w-4" />
         </div>
       </div>

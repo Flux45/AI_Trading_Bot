@@ -105,8 +105,8 @@ export const HeartbeatSentinelModal: React.FC<HeartbeatSentinelModalProps> = ({ 
 
     try {
       const targetUrl =
-        telemetry?.suggested_endpoints?.production ||
-        'https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/heartbeat';
+        telemetry?.suggested_endpoints?.direct_200_ok ||
+        'https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/__cookie_check.html?return_url=https%3A%2F%2Fais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app%2Fapi%2Fheartbeat';
 
       const res = await fetch('/api/cronjob/setup', {
         method: 'POST',
@@ -116,12 +116,13 @@ export const HeartbeatSentinelModal: React.FC<HeartbeatSentinelModalProps> = ({ 
           targetUrl,
           intervalMinutes: cronInterval,
           title: 'AI Bot Advance 24/7 Heartbeat Sentinel',
+          notifyOnFailure: false,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
-        setCronSuccessMsg(data.message || 'Cron job successfully registered on cron-job.org!');
+        setCronSuccessMsg(data.message || 'Cron job successfully registered and updated on cron-job.org!');
         fetchTelemetry();
       } else if (data.requiresManualSetup) {
         setCronErrorMsg(data.message);
@@ -136,8 +137,8 @@ export const HeartbeatSentinelModal: React.FC<HeartbeatSentinelModalProps> = ({ 
   };
 
   const prodUrl =
-    telemetry?.suggested_endpoints?.production ||
-    'https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/api/heartbeat';
+    telemetry?.suggested_endpoints?.direct_200_ok ||
+    'https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/__cookie_check.html?return_url=https%3A%2F%2Fais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app%2Fapi%2Fheartbeat';
 
   const uptimeHours = telemetry
     ? Math.floor(telemetry.uptime_seconds / 3600)

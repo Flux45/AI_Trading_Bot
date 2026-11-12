@@ -6,16 +6,15 @@ import {
   Target,
   ShieldAlert,
   Zap,
-  Info,
   Calendar,
   Sparkles,
-  ArrowRight,
   BarChart3,
   ShoppingBag,
   CheckCircle2,
   Plus,
   Minus,
   Sliders,
+  BrainCircuit,
 } from 'lucide-react';
 import type { MarketContext, TradeHypothesis, ScannedStock, OrderTicket, IndependentDecision } from '../types';
 import { calculateTimeHorizon } from '../utils/quantMetrics';
@@ -39,6 +38,7 @@ interface SelectedStockHorizonCardProps {
     ticket?: OrderTicket;
   }) => Promise<void>;
   isPlacingOrder?: boolean;
+  onOpenLossReasoning?: (ticker: string) => void;
 }
 
 export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> = ({
@@ -52,6 +52,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
   isRunning,
   onPlaceManualOrder,
   isPlacingOrder = false,
+  onOpenLossReasoning,
 }) => {
   if (!marketContext) return null;
 
@@ -92,7 +93,6 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
     horizon.approxTimeLabel;
 
   const targetDiffRupees = Math.abs((targetPrice || currentPrice) - currentPrice);
-  const stopDiffRupees = Math.abs(currentPrice - (stopLoss || currentPrice));
 
   // User-selected quantity and order parameters
   const defaultQuantity = ticket?.shares || Math.max(1, Math.floor(15000 / currentPrice));
@@ -124,67 +124,92 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
   return (
     <div
       id={`selected-stock-horizon-${ticker.toLowerCase()}`}
-      className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-xs"
+      className="overflow-hidden rounded-2xl border-2 border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 shadow-sm"
     >
       {/* Top Banner with Ticker Identity & Quick Action */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 bg-stone-50/70 px-5 py-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-950 px-5 py-3.5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-900 text-sm font-black text-amber-400 shadow-2xs">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-black text-white shadow-xs">
             {ticker.slice(0, 3)}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-extrabold text-stone-900">{ticker}.NS</h2>
+              <h2 className="text-base font-extrabold text-stone-950 dark:text-white">{ticker}.NS</h2>
               {scannedStock?.name && (
-                <span className="hidden sm:inline text-xs text-stone-500 font-medium">
+                <span className="hidden sm:inline text-xs text-stone-600 dark:text-stone-300 font-medium">
                   {scannedStock.name}
                 </span>
               )}
               {scannedStock?.sector && (
-                <span className="rounded-md bg-stone-200/70 px-2 py-0.5 text-[10px] font-bold text-stone-700">
+                <span className="rounded-md bg-stone-200 dark:bg-stone-800 px-2 py-0.5 text-[10px] font-bold text-stone-800 dark:text-stone-200">
                   {scannedStock.sector}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 text-xs text-stone-500">
-              <span>Latest: <strong className="text-stone-900 font-mono">₹{currentPrice.toLocaleString('en-IN')}</strong></span>
+            <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span>
+                Latest:{' '}
+                <strong className="text-stone-950 dark:text-white font-mono tabular-nums">
+                  ₹{currentPrice.toLocaleString('en-IN')}
+                </strong>
+              </span>
               <span>&bull;</span>
-              <span className={`inline-flex items-center gap-0.5 font-bold ${momentum20d >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+              <span
+                className={`inline-flex items-center gap-0.5 font-bold tabular-nums ${
+                  momentum20d >= 0
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-rose-700 dark:text-rose-400'
+                }`}
+              >
                 {momentum20d >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                {momentum20d >= 0 ? '+' : ''}{momentum20d}% 20d momentum
+                {momentum20d >= 0 ? '+' : ''}
+                {momentum20d}% 20d momentum
               </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {onOpenLossReasoning && (
+            <button
+              type="button"
+              onClick={() => onOpenLossReasoning(ticker)}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-400 dark:border-amber-500/70 bg-amber-50 dark:bg-amber-950/80 px-3 py-1.5 text-xs font-bold text-amber-950 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900 transition cursor-pointer"
+            >
+              <BrainCircuit className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Why Lost / Algo Reasoning</span>
+            </button>
+          )}
+
           <button
             id="btn-horizon-trigger-heartbeat"
             onClick={onRunHeartbeat}
             disabled={isRunning}
-            className="flex items-center gap-1.5 rounded-xl bg-stone-900 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-stone-800 disabled:opacity-50 shadow-xs"
+            className="flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 text-xs font-bold text-white transition disabled:opacity-50 shadow-xs cursor-pointer"
           >
-            <Zap className={`h-3.5 w-3.5 text-amber-400 ${isRunning ? 'animate-spin' : ''}`} />
-            <span>{isRunning ? 'Analyzing...' : 'Run Heartbeat Scan'}</span>
+            <Zap className={`h-3.5 w-3.5 text-amber-300 ${isRunning ? 'animate-spin' : ''}`} />
+            <span>{isRunning ? 'Analyzing...' : 'Run Fast Pipeline'}</span>
           </button>
 
           {onPlaceManualOrder && (
             <button
               id="btn-horizon-place-manual-order"
-              onClick={() => onPlaceManualOrder({
-                ticker,
-                action: orderAction,
-                shares: quantity,
-                entry_price: currentPrice,
-                stop_loss: customStopLoss,
-                target_price: customTargetPrice,
-                ticket: ticket || undefined,
-              })}
+              onClick={() =>
+                onPlaceManualOrder({
+                  ticker,
+                  action: orderAction,
+                  shares: quantity,
+                  entry_price: currentPrice,
+                  stop_loss: customStopLoss,
+                  target_price: customTargetPrice,
+                  ticket: ticket || undefined,
+                })
+              }
               disabled={isPlacingOrder}
-              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold text-white transition shadow-xs disabled:opacity-50 ${
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold text-white transition shadow-xs disabled:opacity-50 cursor-pointer ${
                 orderAction === 'SELL'
-                  ? 'bg-rose-600 hover:bg-rose-700'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
+                  ? 'bg-rose-600 hover:bg-rose-500'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
               }`}
             >
               <ShoppingBag className={`h-3.5 w-3.5 ${isPlacingOrder ? 'animate-spin' : ''}`} />
@@ -196,48 +221,62 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
 
       {/* Post-Scan Autonomous Recommendation Ribbon */}
       {(hypothesis || ticket || independentDecision) && (
-        <div id="horizon-autonomous-decision-ribbon" className="border-b border-stone-100 bg-amber-50/40 px-5 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+        <div
+          id="horizon-autonomous-decision-ribbon"
+          className="border-b border-amber-300 dark:border-amber-700/70 bg-amber-50 dark:bg-amber-950/70 px-5 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2"
+        >
           <div className="flex items-center flex-wrap gap-2">
-            <Sparkles className="h-4 w-4 text-amber-600 shrink-0" />
-            <span className="font-bold text-stone-800">
+            <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="font-bold text-stone-950 dark:text-white">
               Autonomous Decision: {independentDecision?.verdictLabel || hypothesis?.bias || 'EVALUATED'}
             </span>
-            <span className="text-stone-300">&bull;</span>
-            <span className="text-stone-600">
-              Target: <strong className="font-mono text-emerald-700">₹{targetPrice?.toFixed(2)}</strong> (+{returnMarginPct}%)
+            <span className="text-stone-400 dark:text-stone-500">&bull;</span>
+            <span className="text-stone-800 dark:text-stone-200 font-medium">
+              Target:{' '}
+              <strong className="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums">
+                ₹{targetPrice?.toFixed(2)}
+              </strong>{' '}
+              (+{returnMarginPct}%)
             </span>
-            <span className="text-stone-300">&bull;</span>
-            <span className="text-stone-600">
-              Stop: <strong className="font-mono text-rose-700">₹{stopLoss?.toFixed(2)}</strong>
+            <span className="text-stone-400 dark:text-stone-500">&bull;</span>
+            <span className="text-stone-800 dark:text-stone-200 font-medium">
+              Stop:{' '}
+              <strong className="font-mono text-rose-700 dark:text-rose-400 tabular-nums">
+                ₹{stopLoss?.toFixed(2)}
+              </strong>
             </span>
             {ticket?.shares ? (
               <>
-                <span className="text-stone-300">&bull;</span>
-                <span className="text-stone-600">
-                  Risk-Sized: <strong className="font-mono text-stone-900">{ticket.shares} shares</strong> (₹{ticket.capital_allocated?.toLocaleString('en-IN')})
+                <span className="text-stone-400 dark:text-stone-500">&bull;</span>
+                <span className="text-stone-800 dark:text-stone-200 font-medium">
+                  Risk-Sized:{' '}
+                  <strong className="font-mono text-stone-950 dark:text-white tabular-nums">
+                    {ticket.shares} shares
+                  </strong>{' '}
+                  (₹{ticket.capital_allocated?.toLocaleString('en-IN')})
                 </span>
               </>
             ) : null}
-            <span className="text-stone-300">&bull;</span>
-            <span className="text-stone-500 italic">Select quantity below to place order</span>
           </div>
 
           {onPlaceManualOrder && (
             <button
               id="btn-horizon-ribbon-quick-buy"
-              onClick={() => onPlaceManualOrder({
-                ticker,
-                action: orderAction,
-                shares: quantity,
-                entry_price: currentPrice,
-                stop_loss: customStopLoss,
-                target_price: customTargetPrice,
-                ticket: ticket || undefined,
-              })}
+              onClick={() =>
+                onPlaceManualOrder({
+                  ticker,
+                  action: orderAction,
+                  shares: quantity,
+                  entry_price: currentPrice,
+                  stop_loss: customStopLoss,
+                  target_price: customTargetPrice,
+                  ticket: ticket || undefined,
+                })
+              }
               disabled={isPlacingOrder}
-              className="flex items-center gap-1 rounded-lg bg-stone-900 px-3 py-1 text-xs font-bold text-white hover:bg-stone-800 transition shadow-2xs disabled:opacity-50"
+              className="flex items-center gap-1 rounded-lg bg-stone-900 dark:bg-amber-500 px-3 py-1 text-xs font-bold text-white dark:text-stone-950 hover:bg-stone-800 dark:hover:bg-amber-400 transition shadow-2xs disabled:opacity-50 cursor-pointer"
             >
-              <CheckCircle2 className="h-3 w-3 text-amber-400" />
+              <CheckCircle2 className="h-3 w-3 text-amber-400 dark:text-stone-950" />
               <span>Execute {quantity} Shares</span>
             </button>
           )}
@@ -246,31 +285,34 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
 
       {/* Prominent Manual Order Placement & Stock Quantity Selection Console */}
       {onPlaceManualOrder && (
-        <div id="manual-order-quantity-console" className="border-b border-stone-200 bg-stone-50/80 p-4 sm:px-6 sm:py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/60 pb-3">
+        <div
+          id="manual-order-quantity-console"
+          className="border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/90 p-4 sm:px-6 sm:py-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 dark:border-stone-800 pb-3">
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-900 text-amber-400">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-900 dark:bg-amber-500 text-amber-400 dark:text-stone-950">
                 <ShoppingBag className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-900">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-950 dark:text-white">
                   Manual Order Placement &amp; Quantity Selection
                 </h3>
-                <p className="text-[11px] text-stone-500">
+                <p className="text-[11px] text-stone-600 dark:text-stone-400">
                   Choose the exact number of shares or allocate by budget for {ticker}.NS
                 </p>
               </div>
             </div>
 
             {/* Action Toggle BUY / SELL */}
-            <div className="flex items-center rounded-lg border border-stone-300 bg-white p-0.5 shadow-2xs">
+            <div className="flex items-center rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-0.5 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setOrderAction('BUY')}
-                className={`rounded-md px-3 py-1 text-xs font-bold transition ${
+                className={`rounded-md px-3 py-1 text-xs font-bold transition cursor-pointer ${
                   orderAction === 'BUY'
                     ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
                 }`}
               >
                 BUY (Long)
@@ -278,10 +320,10 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
               <button
                 type="button"
                 onClick={() => setOrderAction('SELL')}
-                className={`rounded-md px-3 py-1 text-xs font-bold transition ${
+                className={`rounded-md px-3 py-1 text-xs font-bold transition cursor-pointer ${
                   orderAction === 'SELL'
                     ? 'bg-rose-600 text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
                 }`}
               >
                 SELL (Short)
@@ -293,14 +335,14 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
           <div className="mt-3.5 grid grid-cols-1 gap-4 lg:grid-cols-12 items-center">
             {/* Col 1: Stepper & Direct Quantity Input */}
             <div className="lg:col-span-4">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-600 mb-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
                 Select Quantity of Stocks
               </label>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-300 bg-white text-stone-700 hover:bg-stone-100 transition font-bold text-sm shadow-2xs active:scale-95"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-white hover:bg-stone-100 dark:hover:bg-stone-700 transition font-bold text-sm shadow-2xs active:scale-95 cursor-pointer"
                   title="Decrease quantity by 1"
                 >
                   <Minus className="h-4 w-4" />
@@ -313,16 +355,16 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                     step={1}
                     value={quantity}
                     onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-center text-sm font-mono font-extrabold text-stone-900 shadow-2xs focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                    className="w-full rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-1.5 text-center text-sm font-mono font-extrabold text-stone-950 dark:text-white shadow-2xs focus:border-blue-500 focus:outline-none tabular-nums"
                   />
-                  <span className="absolute right-2.5 top-2 text-[10px] font-semibold text-stone-400 pointer-events-none">
+                  <span className="absolute right-2.5 top-2 text-[10px] font-semibold text-stone-500 dark:text-stone-400 pointer-events-none">
                     SHARES
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setQuantity((prev) => prev + 1)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-300 bg-white text-stone-700 hover:bg-stone-100 transition font-bold text-sm shadow-2xs active:scale-95"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-white hover:bg-stone-100 dark:hover:bg-stone-700 transition font-bold text-sm shadow-2xs active:scale-95 cursor-pointer"
                   title="Increase quantity by 1"
                 >
                   <Plus className="h-4 w-4" />
@@ -331,16 +373,16 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
 
               {/* Quick Quantity Presets */}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-bold text-stone-400 mr-0.5">Quick:</span>
+                <span className="text-[10px] font-bold text-stone-600 dark:text-stone-400 mr-0.5">Quick:</span>
                 {[1, 5, 10, 25, 50, 100].map((qty) => (
                   <button
                     key={qty}
                     type="button"
                     onClick={() => setQuantity(qty)}
-                    className={`rounded-md px-2 py-0.5 text-[11px] font-bold font-mono transition shadow-2xs ${
+                    className={`rounded-md px-2 py-0.5 text-[11px] font-bold font-mono transition shadow-2xs cursor-pointer ${
                       quantity === qty
-                        ? 'bg-stone-900 text-amber-400'
-                        : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-100'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-700'
                     }`}
                   >
                     {qty}
@@ -350,19 +392,21 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
             </div>
 
             {/* Col 2: Budget Presets & Capital Required */}
-            <div className="lg:col-span-4 rounded-xl border border-stone-200/80 bg-white p-3 shadow-2xs">
+            <div className="lg:col-span-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-3 shadow-2xs">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-stone-500 font-medium">Estimated Capital:</span>
-                <span className="font-mono font-extrabold text-stone-900 text-sm">
+                <span className="text-stone-600 dark:text-stone-300 font-semibold">Estimated Capital:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white text-sm tabular-nums">
                   ₹{(quantity * currentPrice).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </span>
               </div>
-              <div className="mt-1 flex items-center justify-between text-[11px] text-stone-500">
+              <div className="mt-1 flex items-center justify-between text-[11px] text-stone-600 dark:text-stone-400">
                 <span>Current Market Price:</span>
-                <span className="font-mono font-bold text-stone-700">₹{currentPrice.toFixed(2)}</span>
+                <span className="font-mono font-bold text-stone-900 dark:text-stone-200 tabular-nums">
+                  ₹{currentPrice.toFixed(2)}
+                </span>
               </div>
-              <div className="mt-2 pt-2 border-t border-stone-100 flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-bold text-stone-400">By Capital:</span>
+              <div className="mt-2 pt-2 border-t border-stone-200 dark:border-stone-800 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-bold text-stone-500 dark:text-stone-400">By Capital:</span>
                 {[
                   { label: '₹10K', amount: 10000 },
                   { label: '₹25K', amount: 25000 },
@@ -373,7 +417,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                     key={b.label}
                     type="button"
                     onClick={() => setQuantityByBudget(b.amount)}
-                    className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 hover:bg-stone-100 hover:text-stone-900 transition"
+                    className="rounded-md border border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 px-2 py-0.5 text-[10px] font-bold text-stone-800 dark:text-stone-200 hover:bg-stone-200 dark:hover:bg-stone-700 transition cursor-pointer"
                   >
                     {b.label}
                   </button>
@@ -398,17 +442,17 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                   })
                 }
                 disabled={isPlacingOrder}
-                className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 px-4 text-xs font-bold text-white shadow-xs transition active:scale-98 disabled:opacity-50 ${
+                className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 px-4 text-xs font-bold text-white shadow-xs transition active:scale-98 disabled:opacity-50 cursor-pointer ${
                   orderAction === 'BUY'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-rose-600 hover:bg-rose-700'
+                    ? 'bg-emerald-600 hover:bg-emerald-500'
+                    : 'bg-rose-600 hover:bg-rose-500'
                 }`}
               >
                 <ShoppingBag className={`h-4 w-4 ${isPlacingOrder ? 'animate-spin' : ''}`} />
                 <span>
                   {isPlacingOrder
                     ? 'Placing Order...'
-                    : `Execute ${orderAction} (${quantity} Shares &bull; ₹${Math.round(quantity * currentPrice).toLocaleString('en-IN')})`}
+                    : `Execute ${orderAction} (${quantity} Shares • ₹${Math.round(quantity * currentPrice).toLocaleString('en-IN')})`}
                 </span>
               </button>
 
@@ -417,12 +461,12 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                 <button
                   type="button"
                   onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  className="flex items-center gap-1 font-semibold text-stone-500 hover:text-stone-800 transition"
+                  className="flex items-center gap-1 font-bold text-stone-700 dark:text-stone-300 hover:text-blue-600 dark:hover:text-amber-400 transition cursor-pointer"
                 >
                   <Sliders className="h-3 w-3" />
                   <span>{showAdvancedSettings ? 'Hide Targets' : 'Customize Target / Stop'}</span>
                 </button>
-                <span className="font-mono text-[10px] text-stone-400">
+                <span className="font-mono text-[10px] font-semibold text-stone-600 dark:text-stone-300 tabular-nums">
                   SL: ₹{customStopLoss?.toFixed(1)} &bull; TGT: ₹{customTargetPrice?.toFixed(1)}
                 </span>
               </div>
@@ -431,10 +475,10 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
 
           {/* Optional Advanced Stop Loss & Target Price Fine-Tuning */}
           {showAdvancedSettings && (
-            <div className="mt-3 rounded-xl border border-stone-200 bg-white p-3 text-xs">
+            <div className="mt-3 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-3 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-emerald-800 mb-1">
+                  <label className="block text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mb-1">
                     Target Price (₹)
                   </label>
                   <input
@@ -442,7 +486,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                     step="0.05"
                     value={customTargetPrice}
                     onChange={(e) => setCustomTargetPrice(Number(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1.5 text-xs font-mono font-bold text-emerald-700 focus:bg-white focus:outline-none"
+                    className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 px-2.5 py-1.5 text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400 focus:outline-none"
                   />
                   <div className="mt-1 flex gap-1">
                     {[1.03, 1.05, 1.08].map((mul) => (
@@ -450,7 +494,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                         key={mul}
                         type="button"
                         onClick={() => setCustomTargetPrice(Number((currentPrice * mul).toFixed(2)))}
-                        className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100"
+                        className="rounded bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-200 cursor-pointer"
                       >
                         +{((mul - 1) * 100).toFixed(0)}%
                       </button>
@@ -458,7 +502,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-rose-800 mb-1">
+                  <label className="block text-[11px] font-bold text-rose-700 dark:text-rose-400 mb-1">
                     Stop Loss (₹)
                   </label>
                   <input
@@ -466,7 +510,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                     step="0.05"
                     value={customStopLoss}
                     onChange={(e) => setCustomStopLoss(Number(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1.5 text-xs font-mono font-bold text-rose-700 focus:bg-white focus:outline-none"
+                    className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 px-2.5 py-1.5 text-xs font-mono font-bold text-rose-700 dark:text-rose-400 focus:outline-none"
                   />
                   <div className="mt-1 flex gap-1">
                     {[0.985, 0.98, 0.97].map((mul) => (
@@ -474,7 +518,7 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
                         key={mul}
                         type="button"
                         onClick={() => setCustomStopLoss(Number((currentPrice * mul).toFixed(2)))}
-                        className="rounded bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 hover:bg-rose-100"
+                        className="rounded bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-200 hover:bg-rose-200 cursor-pointer"
                       >
                         -{((1 - mul) * 100).toFixed(1)}%
                       </button>
@@ -487,160 +531,184 @@ export const SelectedStockHorizonCard: React.FC<SelectedStockHorizonCardProps> =
         </div>
       )}
 
-      {/* Main Quantitative Grid */}
-      <div className="p-5">
+      {/* Main High-Contrast Quantitative Grid (Return Margin, Approx Time, Risk Margin & Stop, ATR-14) */}
+      <div className="p-5 bg-white dark:bg-stone-900">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Card 1: Expected Return Margin */}
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3.5">
+          {/* Card 1: Expected Return Margin (High Contrast Emerald) */}
+          <div className="rounded-xl border-2 border-emerald-400 dark:border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950 p-4 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-950 dark:text-emerald-200">
                 Return Margin
               </span>
-              <Target className="h-3.5 w-3.5 text-emerald-600" />
+              <Target className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-emerald-700">+{returnMarginPct}%</span>
-              <span className="text-xs font-semibold text-emerald-800">upside</span>
+            <div className="mt-1.5 flex items-baseline gap-1.5 font-mono tabular-nums">
+              <span className="text-2xl font-black text-emerald-700 dark:text-emerald-300">
+                +{returnMarginPct}%
+              </span>
+              <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 font-sans">
+                upside
+              </span>
             </div>
-            <div className="mt-2 space-y-0.5 text-[11px] text-stone-600">
-              <div className="flex justify-between">
-                <span className="text-stone-500">Target Price:</span>
-                <span className="font-mono font-bold text-stone-900">₹{targetPrice?.toFixed(2) || '—'}</span>
+            <div className="mt-2.5 space-y-1 pt-2 border-t border-emerald-200 dark:border-emerald-800/80 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-emerald-900 dark:text-emerald-200">Target Price:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white tabular-nums">
+                  ₹{targetPrice?.toFixed(2) || '—'}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-stone-500">Target Spread:</span>
-                <span className="font-mono font-semibold text-emerald-700">+₹{targetDiffRupees.toFixed(2)}</span>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-emerald-900 dark:text-emerald-200">Target Spread:</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                  +₹{targetDiffRupees.toFixed(2)}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Card 2: Approx Time to Gain Return (Key Request!) */}
-          <div className="relative overflow-hidden rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50/90 via-amber-50/50 to-white p-3.5 shadow-xs">
+          {/* Card 2: Approx Time to Gain Return (High Contrast Amber) */}
+          <div className="rounded-xl border-2 border-amber-400 dark:border-amber-500/80 bg-amber-50 dark:bg-amber-950 p-4 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5 text-amber-600" />
+              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-200 flex items-center gap-1">
+                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 Approx. Time to Gain
               </span>
-              <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-900 uppercase">
+              <span className="rounded bg-amber-200 dark:bg-amber-800 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-950 dark:text-amber-100 uppercase">
                 {horizon.momentumDriftPace}
               </span>
             </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-stone-900">~{approxDays}d</span>
-              <span className="text-xs font-bold text-amber-800">
+            <div className="mt-1.5 flex items-baseline gap-1.5 font-mono tabular-nums">
+              <span className="text-2xl font-black text-stone-950 dark:text-white">
+                ~{approxDays}d
+              </span>
+              <span className="text-xs font-bold text-amber-900 dark:text-amber-300 font-sans">
                 ({horizon.calendarWeeks})
               </span>
             </div>
-            <div className="mt-1.5">
-              <div className="text-[11px] font-bold text-stone-800">
+            <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-800/80">
+              <div className="text-xs font-bold text-stone-950 dark:text-white">
                 {approxTimeLabel}
               </div>
-              <div className="mt-0.5 text-[10px] text-stone-500 leading-tight">
-                Directional drift: <strong className="text-stone-700">{horizon.velocityPerDay}</strong> at ATR efficiency
+              <div className="mt-0.5 text-[11px] text-amber-900 dark:text-amber-200 leading-tight">
+                Drift velocity: <strong className="text-stone-950 dark:text-white font-mono">{horizon.velocityPerDay}</strong>
               </div>
             </div>
           </div>
 
-          {/* Card 3: Volatility & Risk Margin */}
-          <div className="rounded-xl border border-stone-200/90 bg-stone-50/50 p-3.5">
+          {/* Card 3: Volatility & Risk Margin & Stop (High Contrast Rose/Red) */}
+          <div className="rounded-xl border-2 border-rose-400 dark:border-rose-500/80 bg-rose-50 dark:bg-rose-950 p-4 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-rose-950 dark:text-rose-200">
                 Risk Margin &amp; Stop
               </span>
-              <ShieldAlert className="h-3.5 w-3.5 text-rose-500" />
+              <ShieldAlert className="h-4 w-4 text-rose-600 dark:text-rose-400" />
             </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-rose-600">-{horizon.riskMarginPct}%</span>
-              <span className="text-xs font-semibold text-stone-500">risk margin</span>
+            <div className="mt-1.5 flex items-baseline gap-1.5 font-mono tabular-nums">
+              <span className="text-2xl font-black text-rose-700 dark:text-rose-300">
+                -{horizon.riskMarginPct}%
+              </span>
+              <span className="text-xs font-bold text-rose-900 dark:text-rose-200 font-sans">
+                risk margin
+              </span>
             </div>
-            <div className="mt-2 space-y-0.5 text-[11px] text-stone-600">
-              <div className="flex justify-between">
-                <span className="text-stone-500">Stop Loss:</span>
-                <span className="font-mono font-bold text-stone-900">₹{stopLoss?.toFixed(2) || '—'}</span>
+            <div className="mt-2.5 space-y-1 pt-2 border-t border-rose-200 dark:border-rose-800/80 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-rose-900 dark:text-rose-200">Stop Loss:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white tabular-nums">
+                  ₹{stopLoss?.toFixed(2) || '—'}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-stone-500">R:R Ratio:</span>
-                <span className="font-mono font-bold text-stone-800">{horizon.riskRewardRatio}:1</span>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-rose-900 dark:text-rose-200">R:R Ratio:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white tabular-nums">
+                  {horizon.riskRewardRatio}:1
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Card 4: Quantitative ATR Drift Velocity */}
-          <div className="rounded-xl border border-stone-200/90 bg-stone-50/50 p-3.5">
+          {/* Card 4: Quantitative ATR-14 Sensory (High Contrast Indigo/Blue) */}
+          <div className="rounded-xl border-2 border-indigo-400 dark:border-indigo-500/80 bg-indigo-50 dark:bg-indigo-950 p-4 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
                 ATR-14 Sensory
               </span>
-              <BarChart3 className="h-3.5 w-3.5 text-indigo-500" />
+              <BarChart3 className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-stone-900">₹{atr.toFixed(1)}</span>
-              <span className="text-xs font-medium text-stone-500">
-                ({((atr / currentPrice) * 100).toFixed(1)}% / day)
+            <div className="mt-1.5 flex items-baseline gap-1.5 font-mono tabular-nums">
+              <span className="text-2xl font-black text-stone-950 dark:text-white">
+                ₹{atr.toFixed(1)}
+              </span>
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 font-sans">
+                ({((atr / currentPrice) * 100).toFixed(1)}% / bar)
               </span>
             </div>
-            <div className="mt-2 space-y-0.5 text-[11px] text-stone-600">
-              <div className="flex justify-between">
-                <span className="text-stone-500">20-Day SMA:</span>
-                <span className="font-mono font-bold text-stone-900">₹{marketContext.sma_20}</span>
+            <div className="mt-2.5 space-y-1 pt-2 border-t border-indigo-200 dark:border-indigo-800/80 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-indigo-900 dark:text-indigo-200">20-Period SMA:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white tabular-nums">
+                  ₹{marketContext.sma_20}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-stone-500">Conviction:</span>
-                <span className="font-mono font-bold text-stone-800">{(confidence * 100).toFixed(0)}%</span>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-indigo-900 dark:text-indigo-200">Conviction:</span>
+                <span className="font-mono font-extrabold text-stone-950 dark:text-white tabular-nums">
+                  {(confidence * 100).toFixed(0)}%
+                </span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Expected Time-to-Target Progression Milestones */}
-        <div className="mt-4 rounded-xl border border-stone-100 bg-stone-50/70 p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/60 pb-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
-              <Calendar className="h-3.5 w-3.5 text-amber-600" />
+        <div className="mt-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-950 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-300 dark:border-stone-800 pb-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-stone-950 dark:text-white">
+              <Calendar className="h-4 w-4 text-amber-500" />
               <span>Time-to-Return Horizon Roadmap ({ticker})</span>
             </div>
-            <span className="text-[11px] text-stone-500">
+            <span className="text-[11px] font-medium text-stone-700 dark:text-stone-300">
               Calculated via Target Distance ÷ (ATR-14 Volatility &times; Momentum Velocity)
             </span>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3 text-xs">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
             {/* Phase 1 */}
-            <div className="rounded-lg border border-stone-200 bg-white p-2.5">
+            <div className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-stone-700 text-[11px]">Phase 1: Entry &amp; Ingestion</span>
-                <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-stone-600">
-                  Day 1–2
+                <span className="font-bold text-stone-950 dark:text-white text-xs">Phase 1: Entry &amp; Stop Anchor</span>
+                <span className="rounded bg-blue-100 dark:bg-blue-900/70 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-900 dark:text-blue-200">
+                  Stage 1
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-stone-500">
-                Position established at ₹{currentPrice.toFixed(2)}. Stop anchor set at ₹{stopLoss?.toFixed(2)}. Initial volatility buffer absorbed.
+              <p className="mt-1.5 text-xs text-stone-700 dark:text-stone-300 leading-relaxed">
+                Position established at <strong className="font-mono text-stone-950 dark:text-white">₹{currentPrice.toFixed(2)}</strong>. Stop anchor set at <strong className="font-mono text-rose-600 dark:text-rose-400">₹{stopLoss?.toFixed(2)}</strong>.
               </p>
             </div>
 
             {/* Phase 2 */}
-            <div className="rounded-lg border border-stone-200 bg-white p-2.5">
+            <div className="rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 p-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-stone-700 text-[11px]">Phase 2: Momentum Drift</span>
-                <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-800">
-                  Day 3–{Math.max(3, Math.round(approxDays * 0.65))}
+                <span className="font-bold text-stone-950 dark:text-white text-xs">Phase 2: Momentum Drift</span>
+                <span className="rounded bg-amber-100 dark:bg-amber-900/70 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-900 dark:text-amber-200">
+                  Stage 2
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-stone-500">
-                Projected move through ₹{((currentPrice + (targetPrice || currentPrice)) / 2).toFixed(2)} midpoint. 20-day trend confirmation.
+              <p className="mt-1.5 text-xs text-stone-700 dark:text-stone-300 leading-relaxed">
+                Projected move through <strong className="font-mono text-stone-950 dark:text-white">₹{((currentPrice + (targetPrice || currentPrice)) / 2).toFixed(2)}</strong> midpoint with VWAP confirmation.
               </p>
             </div>
 
             {/* Phase 3 */}
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-2.5">
+            <div className="rounded-lg border-2 border-emerald-400 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-950/70 p-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-900 text-[11px]">Phase 3: Target Window</span>
-                <span className="rounded bg-emerald-200/80 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-900">
+                <span className="font-bold text-emerald-950 dark:text-emerald-200 text-xs">Phase 3: Target Capture</span>
+                <span className="rounded bg-emerald-200 dark:bg-emerald-800 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-950 dark:text-emerald-100">
                   {approxTimeLabel}
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-emerald-800 font-medium">
-                Anticipated capture of <strong className="text-emerald-900">+{returnMarginPct}%</strong> return margin at ₹{targetPrice?.toFixed(2)}.
+              <p className="mt-1.5 text-xs text-emerald-900 dark:text-emerald-200 font-medium leading-relaxed">
+                Anticipated capture of <strong className="text-emerald-700 dark:text-emerald-300 font-mono">+{returnMarginPct}%</strong> return margin at <strong className="font-mono">₹{targetPrice?.toFixed(2)}</strong>.
               </p>
             </div>
           </div>

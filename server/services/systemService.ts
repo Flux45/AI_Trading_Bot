@@ -147,30 +147,30 @@ export function performTestPing() {
 }
 
 export async function setupCronjob(body: any, req: Request) {
-  const { apiKey, targetUrl, intervalMinutes = 2, title } = body || {};
+  const { apiKey, targetUrl, intervalMinutes = 5, title, notifyOnFailure = false } = body || {};
   const effectiveKey = (apiKey || process.env.CRONJOB_API_KEY || "").trim();
-  const hostHeader = req.get("host") || "localhost:3000";
   const direct200Url =
     "https://ais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app/__cookie_check.html?return_url=https%3A%2F%2Fais-pre-o2ew4xdoqmospajnwbx33j-945170740551.asia-east1.run.app%2Fapi%2Fheartbeat";
-  const defaultUrl = hostHeader.includes("localhost")
-    ? direct200Url
-    : `${req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http"}://${hostHeader}/api/heartbeat`;
-  const pingUrl = targetUrl || defaultUrl;
+  // Always use the Direct 200 OK URL if targetUrl points to /api/heartbeat without __cookie_check.html
+  const pingUrl =
+    targetUrl && targetUrl.includes("__cookie_check.html")
+      ? targetUrl
+      : direct200Url;
 
   if (!effectiveKey) {
     return {
       success: false,
       requiresManualSetup: true,
       message:
-        "No cron-job.org API Key provided. You can easily set up a 100% free cron job in 30 seconds without an API key using the web dashboard!",
+        "No cron-job.org API Key provided. Use the Direct 200 OK URL below on cron-job.org and uncheck 'Notify on failure' to prevent 302 redirect failure emails.",
       manualInstructions: {
-        step1: "Create a free account at https://cron-job.org/en/signup/",
-        step2: "Click 'Create cronjob' at https://cron-job.org/en/members/jobs/add/",
+        step1: "Log in to https://cron-job.org/en/members/jobs/",
+        step2: "Edit your existing cron job (or create a new one)",
         step3_title: title || "AI Bot Advance 24/7 Heartbeat",
         step4_url: direct200Url,
-        step5_schedule: `Every ${intervalMinutes} minutes (or every minute)`,
-        step6: "Select GET request method, then click Save.",
-        note: "Using the direct200Url ensures zero 302 redirection warnings on cron-job.org.",
+        step5_schedule: `Every ${intervalMinutes} minutes`,
+        step6: "Uncheck 'Execution fails' email notifications and enable 'Treat 3xx redirects as success', then click Save.",
+        note: "Using the direct200Url resolves the 302 Found redirection error that caused daily failure emails.",
       },
       recommendedUrl: direct200Url,
     };
@@ -183,6 +183,63 @@ export async function setupCronjob(body: any, req: Request) {
     minutesSchedule = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
   } else if (intervalMinutes === 10) {
     minutesSchedule = [0, 10, 20, 30, 40, 50];
+  } else if (intervalMinutes === 15) {
+    minutesSchedule = [0, 15, 30, 45];
+  }
+
+  // First inspect existing jobs so we can update/repair any failing jobs instead of leaving broken duplicates
+  let repairedCount = 0;
+  try {
+    const existingRes = await fetch("https://api.cron-job.org/jobs", {
+      headers: { Authorization: `Bearer ${effectiveKey}` },
+    });
+    if (existingRes.ok) {
+      const existingData: any = await existingRes.json();
+      const jobs: any[] = existingData?.jobs || [];
+      for (const j of jobs) {
+        if (j.url && (j.url.includes("run.app") || j.title?.includes("AI Bot"))) {
+          await fetch(`https://api.cron-job.org/jobs/${j.jobId}`, {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${effectiveKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              job: {
+                url: direct200Url,
+                enabled: true,
+                redirectSuccess: true,
+                requestTimeout: 30,
+                schedule: {
+                  timezone: "Asia/Kolkata",
+                  hours: [-1],
+                  minutes: minutesSchedule,
+                },
+                notification: {
+                  onFailure: Boolean(notifyOnFailure),
+                  onSuccess: false,
+                  onDisable: false,
+                },
+              },
+            }),
+          });
+          repairedCount++;
+        }
+      }
+    }
+  } catch (_) {}
+
+  if (repairedCount > 0) {
+    dbLogAudit(
+      "CRONJOB_REPAIRED",
+      `Repaired ${repairedCount} existing cron-job.org job(s) to use Direct 200 OK URL and silenced failure emails.`
+    );
+    return {
+      success: true,
+      message: `Repaired ${repairedCount} existing cron-job.org job(s): updated URL to Direct 200 OK, enabled redirectSuccess, and turned off failure email spam.`,
+      targetUrl: pingUrl,
+      schedule: `Every ${intervalMinutes} minute(s)`,
+    };
   }
 
   const payload = {
@@ -190,16 +247,18 @@ export async function setupCronjob(body: any, req: Request) {
       url: pingUrl,
       title: title || "AI Bot Advance 24/7 Heartbeat Sentinel",
       enabled: true,
-      saveResponses: true,
+      saveResponses: false,
+      redirectSuccess: true,
+      requestTimeout: 30,
       schedule: {
         timezone: "Asia/Kolkata",
         hours: [-1],
         minutes: minutesSchedule,
       },
       notification: {
-        onFailure: true,
+        onFailure: Boolean(notifyOnFailure),
         onSuccess: false,
-        onDisable: true,
+        onDisable: false,
       },
     },
   };
@@ -220,12 +279,12 @@ export async function setupCronjob(body: any, req: Request) {
 
   dbLogAudit(
     "CRONJOB_SETUP",
-    `cron-job.org ping registered successfully for ${pingUrl} (every ${intervalMinutes}m). Job ID: ${cronData?.jobId || "N/A"}`
+    `cron-job.org ping registered for ${pingUrl} (every ${intervalMinutes}m, redirectSuccess=true, onFailure=false). Job ID: ${cronData?.jobId || "N/A"}`
   );
 
   return {
     success: true,
-    message: "cron-job.org ping registered and scheduled successfully! Your server will now stay warm 24/7.",
+    message: "cron-job.org job registered with Direct 200 OK URL, redirect tolerance enabled, and failure email spam disabled!",
     targetUrl: pingUrl,
     schedule: `Every ${intervalMinutes} minute(s)`,
     cronjob_response: cronData,

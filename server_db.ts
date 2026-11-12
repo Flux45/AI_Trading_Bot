@@ -54,6 +54,22 @@ export function formatDurationMs(durationMs: number): string {
   return `${seconds}s`;
 }
 
+export function formatIstDateAndTime(isoString?: string): { execution_date: string; execution_time: string } {
+  const dateObj = isoString ? new Date(isoString) : new Date();
+  const validDate = isNaN(dateObj.getTime()) ? new Date() : dateObj;
+  // Format in Asia/Kolkata (IST)
+  const istDate = validDate.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+  const istTime =
+    validDate.toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    }) + " IST";
+  return { execution_date: istDate, execution_time: istTime };
+}
+
 export function getDatabase(modeInput?: string): DatabaseSync {
   const mode = normalizeSystemMode(modeInput);
   if (!dbInstances[mode]) {
@@ -63,11 +79,32 @@ export function getDatabase(modeInput?: string): DatabaseSync {
     if (!fs.existsSync(BACKUP_DIR)) {
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
     }
-    const db = new DatabaseSync(DB_PATHS[mode]);
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec("PRAGMA synchronous = NORMAL;");
-    initSchema(db);
-    dbInstances[mode] = db;
+    const dbPath = DB_PATHS[mode];
+    try {
+      const db = new DatabaseSync(dbPath);
+      db.exec("PRAGMA journal_mode = WAL;");
+      db.exec("PRAGMA synchronous = NORMAL;");
+      const check: any = db.prepare("PRAGMA quick_check;").get();
+      if (check && check.quick_check && check.quick_check !== "ok") {
+        throw new Error(`SQLite quick_check failed: ${check.quick_check}`);
+      }
+      initSchema(db);
+      dbInstances[mode] = db;
+    } catch (err: any) {
+      console.warn(`[SQLite Self-Heal ${mode}] Recovering malformed database (${err?.message || err})...`);
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try {
+          if (fs.existsSync(dbPath + suffix)) {
+            fs.unlinkSync(dbPath + suffix);
+          }
+        } catch (_) {}
+      }
+      const freshDb = new DatabaseSync(dbPath);
+      freshDb.exec("PRAGMA journal_mode = WAL;");
+      freshDb.exec("PRAGMA synchronous = NORMAL;");
+      initSchema(freshDb);
+      dbInstances[mode] = freshDb;
+    }
   }
   return dbInstances[mode]!;
 }
@@ -87,6 +124,8 @@ function initSchema(db: DatabaseSync) {
       rupee_risk REAL NOT NULL,
       timestamp TEXT NOT NULL,
       entry_time TEXT,
+      execution_date TEXT,
+      execution_time TEXT,
       trade_mode TEXT,
       product_type TEXT,
       holding_duration TEXT,
@@ -119,6 +158,8 @@ function initSchema(db: DatabaseSync) {
       timestamp TEXT NOT NULL,
       entry_time TEXT,
       exit_time TEXT,
+      execution_date TEXT,
+      execution_time TEXT,
       duration_ms INTEGER,
       duration_formatted TEXT,
       exit_reason TEXT,
@@ -135,6 +176,8 @@ function initSchema(db: DatabaseSync) {
       id TEXT PRIMARY KEY,
       order_id TEXT NOT NULL,
       timestamp TEXT NOT NULL,
+      execution_date TEXT,
+      execution_time TEXT,
       ticker TEXT NOT NULL,
       company_name TEXT,
       sector TEXT,
@@ -155,6 +198,21 @@ function initSchema(db: DatabaseSync) {
       strategy_name TEXT,
       trade_mode TEXT,
       product_type TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS custom_strategies (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      horizon TEXT NOT NULL,
+      stop_loss_pct REAL NOT NULL,
+      target_pct REAL NOT NULL,
+      max_risk_rupees REAL NOT NULL,
+      min_rr_ratio REAL NOT NULL,
+      entry_rules TEXT NOT NULL,
+      exit_rules TEXT NOT NULL,
+      implications TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
 
@@ -205,6 +263,8 @@ function initSchema(db: DatabaseSync) {
 
   // Run non-destructive column additions for existing SQLite databases
   try { db.exec("ALTER TABLE positions ADD COLUMN entry_time TEXT;"); } catch (_) {}
+  try { db.exec("ALTER TABLE positions ADD COLUMN execution_date TEXT;"); } catch (_) {}
+  try { db.exec("ALTER TABLE positions ADD COLUMN execution_time TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN trade_mode TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN product_type TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN holding_duration TEXT;"); } catch (_) {}
@@ -215,6 +275,8 @@ function initSchema(db: DatabaseSync) {
   try { db.exec("ALTER TABLE trade_history ADD COLUMN company_name TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN entry_time TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN exit_time TEXT;"); } catch (_) {}
+  try { db.exec("ALTER TABLE trade_history ADD COLUMN execution_date TEXT;"); } catch (_) {}
+  try { db.exec("ALTER TABLE trade_history ADD COLUMN execution_time TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN duration_ms INTEGER;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN duration_formatted TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN exit_reason TEXT;"); } catch (_) {}
@@ -224,6 +286,8 @@ function initSchema(db: DatabaseSync) {
   try { db.exec("ALTER TABLE trade_history ADD COLUMN strategy_id TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE trade_history ADD COLUMN strategy_name TEXT;"); } catch (_) {}
 
+  try { db.exec("ALTER TABLE transactions ADD COLUMN execution_date TEXT;"); } catch (_) {}
+  try { db.exec("ALTER TABLE transactions ADD COLUMN execution_time TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE transactions ADD COLUMN trade_mode TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE transactions ADD COLUMN product_type TEXT;"); } catch (_) {}
   try { db.exec("ALTER TABLE transactions ADD COLUMN strategy_id TEXT;"); } catch (_) {}
@@ -237,15 +301,17 @@ export function dbSavePosition(pos: ExecutedPosition, modeInput?: string): void 
     const db = getDatabase(mode);
     const now = new Date().toISOString();
     const entryTime = pos.entry_time || pos.timestamp || now;
+    const { execution_date, execution_time } = formatIstDateAndTime(entryTime);
     const prodType = pos.product_type || (mode === "intraday" ? "MIS" : "CNC");
 
     const stmt = db.prepare(`
       INSERT INTO positions (
         order_id, ticker, action, shares, entry_price, fill_price, stop_loss, target_price,
-        capital_allocated, rupee_risk, timestamp, entry_time, trade_mode, product_type, holding_duration,
+        capital_allocated, rupee_risk, timestamp, entry_time, execution_date, execution_time,
+        trade_mode, product_type, holding_duration,
         current_price, unrealized_pnl, unrealized_pnl_pct, status, breached_stop_ticks, breached_target_ticks,
         strategy_id, strategy_name, market_scenario_rationale, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(order_id) DO UPDATE SET
         current_price = excluded.current_price,
         unrealized_pnl = excluded.unrealized_pnl,
@@ -253,6 +319,8 @@ export function dbSavePosition(pos: ExecutedPosition, modeInput?: string): void 
         status = excluded.status,
         breached_stop_ticks = excluded.breached_stop_ticks,
         breached_target_ticks = excluded.breached_target_ticks,
+        execution_date = coalesce(positions.execution_date, excluded.execution_date),
+        execution_time = coalesce(positions.execution_time, excluded.execution_time),
         strategy_id = coalesce(excluded.strategy_id, positions.strategy_id),
         strategy_name = coalesce(excluded.strategy_name, positions.strategy_name),
         market_scenario_rationale = coalesce(excluded.market_scenario_rationale, positions.market_scenario_rationale),
@@ -273,6 +341,8 @@ export function dbSavePosition(pos: ExecutedPosition, modeInput?: string): void 
       pos.rupee_risk,
       pos.timestamp || now,
       entryTime,
+      (pos as any).execution_date || execution_date,
+      (pos as any).execution_time || execution_time,
       mode.toUpperCase(),
       prodType,
       pos.holding_duration || null,
@@ -289,7 +359,7 @@ export function dbSavePosition(pos: ExecutedPosition, modeInput?: string): void 
       now
     );
 
-    dbLogAudit("POSITION_SAVED", `[${mode.toUpperCase()}] Position ${pos.order_id} (${pos.ticker}) saved in SQLite database.`, pos.order_id, pos.ticker, pos, mode);
+    dbLogAudit("POSITION_SAVED", `[${mode.toUpperCase()}] Position ${pos.order_id} (${pos.ticker}) saved in SQLite database (${execution_date} ${execution_time}).`, pos.order_id, pos.ticker, pos, mode);
   } catch (err: any) {
     console.error(`[DB Error ${modeInput}] Failed to save position to SQLite:`, err?.message || err);
   }
@@ -315,32 +385,38 @@ export function dbGetActivePositions(modeInput?: string): ExecutedPosition[] {
     const db = getDatabase(mode);
     const stmt = db.prepare("SELECT * FROM positions WHERE status = 'OPEN' ORDER BY timestamp DESC");
     const rows = stmt.all() as any[];
-    return rows.map((r) => ({
-      order_id: String(r.order_id),
-      ticker: String(r.ticker),
-      action: r.action as "BUY" | "SELL",
-      shares: Number(r.shares),
-      entry_price: Number(r.entry_price),
-      fill_price: Number(r.fill_price),
-      stop_loss: Number(r.stop_loss),
-      target_price: Number(r.target_price),
-      capital_allocated: Number(r.capital_allocated),
-      rupee_risk: Number(r.rupee_risk),
-      timestamp: String(r.timestamp),
-      entry_time: r.entry_time ? String(r.entry_time) : String(r.timestamp),
-      trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
-      product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
-      holding_duration: r.holding_duration ? String(r.holding_duration) : undefined,
-      current_price: Number(r.current_price || r.fill_price),
-      unrealized_pnl: Number(r.unrealized_pnl || 0),
-      unrealized_pnl_pct: Number(r.unrealized_pnl_pct || 0),
-      status: r.status as "OPEN" | "CLOSED",
-      breached_stop_ticks: Number(r.breached_stop_ticks || 0),
-      breached_target_ticks: Number(r.breached_target_ticks || 0),
-      strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
-      strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
-      market_scenario_rationale: r.market_scenario_rationale ? String(r.market_scenario_rationale) : undefined,
-    }));
+    return rows.map((r) => {
+      const entryTimeStr = r.entry_time ? String(r.entry_time) : String(r.timestamp);
+      const fallbackDt = formatIstDateAndTime(entryTimeStr);
+      return {
+        order_id: String(r.order_id),
+        ticker: String(r.ticker),
+        action: r.action as "BUY" | "SELL",
+        shares: Number(r.shares),
+        entry_price: Number(r.entry_price),
+        fill_price: Number(r.fill_price),
+        stop_loss: Number(r.stop_loss),
+        target_price: Number(r.target_price),
+        capital_allocated: Number(r.capital_allocated),
+        rupee_risk: Number(r.rupee_risk),
+        timestamp: String(r.timestamp),
+        entry_time: entryTimeStr,
+        execution_date: r.execution_date ? String(r.execution_date) : fallbackDt.execution_date,
+        execution_time: r.execution_time ? String(r.execution_time) : fallbackDt.execution_time,
+        trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
+        product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
+        holding_duration: r.holding_duration ? String(r.holding_duration) : undefined,
+        current_price: Number(r.current_price || r.fill_price),
+        unrealized_pnl: Number(r.unrealized_pnl || 0),
+        unrealized_pnl_pct: Number(r.unrealized_pnl_pct || 0),
+        status: r.status as "OPEN" | "CLOSED",
+        breached_stop_ticks: Number(r.breached_stop_ticks || 0),
+        breached_target_ticks: Number(r.breached_target_ticks || 0),
+        strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
+        strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
+        market_scenario_rationale: r.market_scenario_rationale ? String(r.market_scenario_rationale) : undefined,
+      };
+    });
   } catch (err: any) {
     console.error(`[DB Error ${modeInput}] Failed to get active positions:`, err?.message || err);
     return [];
@@ -355,6 +431,7 @@ export function dbSaveTradeHistory(rec: TradeHistoryRecord, modeInput?: string):
     const now = new Date().toISOString();
     const entryTime = rec.entry_time || rec.timestamp || now;
     const exitTime = rec.exit_time || now;
+    const { execution_date, execution_time } = formatIstDateAndTime(entryTime);
     const durMs = rec.duration_ms || Math.max(0, new Date(exitTime).getTime() - new Date(entryTime).getTime());
     const durFmt = rec.duration || formatDurationMs(durMs);
     const prodType = rec.product_type || (mode === "intraday" ? "MIS" : "CNC");
@@ -362,10 +439,11 @@ export function dbSaveTradeHistory(rec: TradeHistoryRecord, modeInput?: string):
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO trade_history (
         id, order_id, ticker, company_name, bias, action, shares, entry_price, exit_price,
-        pnl_realized, pnl_pct, lesson, timestamp, entry_time, exit_time, duration_ms, duration_formatted,
+        pnl_realized, pnl_pct, lesson, timestamp, entry_time, exit_time, execution_date, execution_time,
+        duration_ms, duration_formatted,
         exit_reason, trade_mode, product_type, gain_loss_diagnosis, execution_mode,
         strategy_id, strategy_name, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -384,6 +462,8 @@ export function dbSaveTradeHistory(rec: TradeHistoryRecord, modeInput?: string):
       rec.timestamp || now,
       entryTime,
       exitTime,
+      (rec as any).execution_date || execution_date,
+      (rec as any).execution_time || execution_time,
       durMs,
       durFmt,
       rec.exit_reason || (rec.pnl_realized >= 0 ? "Target Exit" : "Stop Loss Exit"),
@@ -408,32 +488,38 @@ export function dbGetTradeHistory(modeInput?: string): TradeHistoryRecord[] {
     const db = getDatabase(mode);
     const stmt = db.prepare("SELECT * FROM trade_history ORDER BY id DESC");
     const rows = stmt.all() as any[];
-    return rows.map((r) => ({
-      id: Number(r.id),
-      order_id: r.order_id ? String(r.order_id) : undefined,
-      ticker: String(r.ticker),
-      company_name: r.company_name ? String(r.company_name) : String(r.ticker),
-      bias: r.bias as "BULLISH" | "BEARISH" | "NEUTRAL",
-      action: r.action as "BUY" | "SELL",
-      shares: Number(r.shares),
-      entry_price: Number(r.entry_price),
-      exit_price: Number(r.exit_price),
-      pnl_realized: Number(r.pnl_realized),
-      pnl_pct: Number(r.pnl_pct),
-      lesson: String(r.lesson || ""),
-      timestamp: String(r.timestamp),
-      entry_time: r.entry_time ? String(r.entry_time) : undefined,
-      exit_time: r.exit_time ? String(r.exit_time) : undefined,
-      duration: r.duration_formatted ? String(r.duration_formatted) : undefined,
-      duration_ms: r.duration_ms ? Number(r.duration_ms) : undefined,
-      exit_reason: r.exit_reason ? String(r.exit_reason) : undefined,
-      trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
-      product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
-      gain_loss_diagnosis: r.gain_loss_diagnosis ? String(r.gain_loss_diagnosis) : undefined,
-      execution_mode: String(r.execution_mode || "PAPER"),
-      strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
-      strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
-    }));
+    return rows.map((r) => {
+      const entryStr = r.entry_time ? String(r.entry_time) : String(r.timestamp);
+      const fallbackDt = formatIstDateAndTime(entryStr);
+      return {
+        id: Number(r.id),
+        order_id: r.order_id ? String(r.order_id) : undefined,
+        ticker: String(r.ticker),
+        company_name: r.company_name ? String(r.company_name) : String(r.ticker),
+        bias: r.bias as "BULLISH" | "BEARISH" | "NEUTRAL",
+        action: r.action as "BUY" | "SELL",
+        shares: Number(r.shares),
+        entry_price: Number(r.entry_price),
+        exit_price: Number(r.exit_price),
+        pnl_realized: Number(r.pnl_realized),
+        pnl_pct: Number(r.pnl_pct),
+        lesson: String(r.lesson || ""),
+        timestamp: String(r.timestamp),
+        entry_time: r.entry_time ? String(r.entry_time) : undefined,
+        exit_time: r.exit_time ? String(r.exit_time) : undefined,
+        execution_date: r.execution_date ? String(r.execution_date) : fallbackDt.execution_date,
+        execution_time: r.execution_time ? String(r.execution_time) : fallbackDt.execution_time,
+        duration: r.duration_formatted ? String(r.duration_formatted) : undefined,
+        duration_ms: r.duration_ms ? Number(r.duration_ms) : undefined,
+        exit_reason: r.exit_reason ? String(r.exit_reason) : undefined,
+        trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
+        product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
+        gain_loss_diagnosis: r.gain_loss_diagnosis ? String(r.gain_loss_diagnosis) : undefined,
+        execution_mode: String(r.execution_mode || "PAPER"),
+        strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
+        strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
+      };
+    });
   } catch (err: any) {
     console.error(`[DB Error ${modeInput}] Failed to get trade history:`, err?.message || err);
     return [];
@@ -446,21 +532,25 @@ export function dbSaveTransaction(txn: TransactionRecord, modeInput?: string): v
     const mode = normalizeSystemMode(txn.product_type === "CNC" ? "long" : modeInput);
     const db = getDatabase(mode);
     const now = new Date().toISOString();
+    const ts = txn.timestamp || now;
+    const { execution_date, execution_time } = formatIstDateAndTime(ts);
     const prodType = txn.product_type || (mode === "intraday" ? "MIS" : "CNC");
 
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions (
-        id, order_id, timestamp, ticker, company_name, sector, action, type,
+        id, order_id, timestamp, execution_date, execution_time, ticker, company_name, sector, action, type,
         shares, price, total_value, stop_loss, target_price, rupee_risk,
         realized_pnl, realized_pnl_pct, execution_mode, status, notes,
         strategy_id, strategy_name, trade_mode, product_type, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       txn.id,
       txn.order_id,
-      txn.timestamp || now,
+      ts,
+      (txn as any).execution_date || execution_date,
+      (txn as any).execution_time || execution_time,
       txn.ticker,
       txn.company_name || txn.ticker,
       txn.sector || "NSE Equities",
@@ -496,33 +586,108 @@ export function dbGetTransactions(modeInput?: string): TransactionRecord[] {
     const db = getDatabase(mode);
     const stmt = db.prepare("SELECT * FROM transactions ORDER BY id DESC");
     const rows = stmt.all() as any[];
-    return rows.map((r) => ({
-      id: String(r.id),
-      order_id: String(r.order_id),
-      timestamp: String(r.timestamp),
-      ticker: String(r.ticker),
-      company_name: String(r.company_name || r.ticker),
-      sector: String(r.sector || "NSE Equities"),
-      action: r.action as "BUY" | "SELL",
-      type: r.type as any,
-      shares: Number(r.shares),
-      price: Number(r.price),
-      total_value: Number(r.total_value),
-      stop_loss: r.stop_loss !== null ? Number(r.stop_loss) : undefined,
-      target_price: r.target_price !== null ? Number(r.target_price) : undefined,
-      rupee_risk: r.rupee_risk !== null ? Number(r.rupee_risk) : undefined,
-      realized_pnl: r.realized_pnl !== null ? Number(r.realized_pnl) : undefined,
-      realized_pnl_pct: r.realized_pnl_pct !== null ? Number(r.realized_pnl_pct) : undefined,
-      execution_mode: r.execution_mode as "PAPER" | "ZERODHA",
-      status: r.status as any,
-      notes: String(r.notes || ""),
-      strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
-      strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
-      trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
-      product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
-    }));
+    return rows.map((r) => {
+      const tsStr = String(r.timestamp);
+      const fallbackDt = formatIstDateAndTime(tsStr);
+      return {
+        id: String(r.id),
+        order_id: String(r.order_id),
+        timestamp: tsStr,
+        execution_date: r.execution_date ? String(r.execution_date) : fallbackDt.execution_date,
+        execution_time: r.execution_time ? String(r.execution_time) : fallbackDt.execution_time,
+        ticker: String(r.ticker),
+        company_name: String(r.company_name || r.ticker),
+        sector: String(r.sector || "NSE Equities"),
+        action: r.action as "BUY" | "SELL",
+        type: r.type as any,
+        shares: Number(r.shares),
+        price: Number(r.price),
+        total_value: Number(r.total_value),
+        stop_loss: r.stop_loss !== null ? Number(r.stop_loss) : undefined,
+        target_price: r.target_price !== null ? Number(r.target_price) : undefined,
+        rupee_risk: r.rupee_risk !== null ? Number(r.rupee_risk) : undefined,
+        realized_pnl: r.realized_pnl !== null ? Number(r.realized_pnl) : undefined,
+        realized_pnl_pct: r.realized_pnl_pct !== null ? Number(r.realized_pnl_pct) : undefined,
+        execution_mode: r.execution_mode as "PAPER" | "ZERODHA",
+        status: r.status as any,
+        notes: String(r.notes || ""),
+        strategy_id: r.strategy_id ? String(r.strategy_id) : undefined,
+        strategy_name: r.strategy_name ? String(r.strategy_name) : undefined,
+        trade_mode: (r.trade_mode || (mode === "intraday" ? "INTRADAY" : "LONG")) as any,
+        product_type: (r.product_type || (mode === "intraday" ? "MIS" : "CNC")) as any,
+      };
+    });
   } catch (err: any) {
     console.error(`[DB Error ${modeInput}] Failed to get transactions:`, err?.message || err);
+    return [];
+  }
+}
+
+export interface CustomStrategyRecord {
+  id: string;
+  name: string;
+  category: string;
+  horizon: string;
+  stop_loss_pct: number;
+  target_pct: number;
+  max_risk_rupees: number;
+  min_rr_ratio: number;
+  entry_rules: string;
+  exit_rules: string;
+  implications: string;
+  created_at: string;
+}
+
+export function dbSaveCustomStrategy(strat: CustomStrategyRecord, modeInput?: string): void {
+  try {
+    const mode = normalizeSystemMode(modeInput);
+    const db = getDatabase(mode);
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO custom_strategies (
+        id, name, category, horizon, stop_loss_pct, target_pct, max_risk_rupees,
+        min_rr_ratio, entry_rules, exit_rules, implications, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      strat.id,
+      strat.name,
+      strat.category,
+      strat.horizon,
+      strat.stop_loss_pct,
+      strat.target_pct,
+      strat.max_risk_rupees,
+      strat.min_rr_ratio,
+      strat.entry_rules,
+      strat.exit_rules,
+      strat.implications,
+      strat.created_at || new Date().toISOString()
+    );
+  } catch (err: any) {
+    console.error("[DB Error] Failed to save custom strategy:", err?.message || err);
+  }
+}
+
+export function dbGetCustomStrategies(modeInput?: string): CustomStrategyRecord[] {
+  try {
+    const mode = normalizeSystemMode(modeInput);
+    const db = getDatabase(mode);
+    const rows = db.prepare("SELECT * FROM custom_strategies ORDER BY created_at DESC").all() as any[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      category: String(r.category),
+      horizon: String(r.horizon),
+      stop_loss_pct: Number(r.stop_loss_pct),
+      target_pct: Number(r.target_pct),
+      max_risk_rupees: Number(r.max_risk_rupees),
+      min_rr_ratio: Number(r.min_rr_ratio),
+      entry_rules: String(r.entry_rules),
+      exit_rules: String(r.exit_rules),
+      implications: String(r.implications),
+      created_at: String(r.created_at),
+    }));
+  } catch (err: any) {
+    console.error("[DB Error] Failed to get custom strategies:", err?.message || err);
     return [];
   }
 }

@@ -17,6 +17,7 @@ import {
   loadCompleteState,
   normalizeSystemMode,
   formatDurationMs,
+  formatIstDateAndTime,
   TradingSystemMode,
 } from "../../server_db.ts";
 import { fetchRealtimeLivePrice, getEquityContext } from "./marketDataService.ts";
@@ -313,6 +314,7 @@ export async function routeOrder(ticket: OrderTicket, modeInput?: string): Promi
   const stratName = (ticket as any).strategy_name || defaultStratName;
 
   const nowIso = new Date().toISOString();
+  const { execution_date, execution_time } = formatIstDateAndTime(nowIso);
   const prodType = mode === "intraday" ? "MIS" : "CNC";
 
   const position: ExecutedPosition = {
@@ -328,6 +330,8 @@ export async function routeOrder(ticket: OrderTicket, modeInput?: string): Promi
     rupee_risk: rupeeRisk,
     timestamp: nowIso,
     entry_time: nowIso,
+    execution_date,
+    execution_time,
     trade_mode: mode === "intraday" ? "INTRADAY" : "LONG",
     product_type: prodType,
     holding_duration: "Just opened",
@@ -346,6 +350,8 @@ export async function routeOrder(ticket: OrderTicket, modeInput?: string): Promi
     id: `TXN-${mode.toUpperCase()}-${String(state.transactionsLedger.length + 1).padStart(3, "0")}`,
     order_id: orderId,
     timestamp: nowIso,
+    execution_date,
+    execution_time,
     ticker: ticket.ticker,
     company_name: company?.name || ticket.ticker,
     sector: company?.sector || "NSE Equities",
@@ -465,6 +471,7 @@ export async function closePosition(
 
   const company = STOCK_UNIVERSE_MAP[pos.ticker];
   const prodType = pos.product_type || (targetMode === "intraday" ? "MIS" : "CNC");
+  const { execution_date, execution_time } = formatIstDateAndTime(entryTimeIso);
 
   const newRecord: TradeHistoryRecord = {
     id: state.tradeHistory.length + 1,
@@ -482,6 +489,8 @@ export async function closePosition(
     timestamp: exitTimeIso,
     entry_time: entryTimeIso,
     exit_time: exitTimeIso,
+    execution_date: pos.execution_date || execution_date,
+    execution_time: pos.execution_time || execution_time,
     duration: durationFormatted,
     duration_ms: durationMs,
     exit_reason: exitReason,
